@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <LangVersion>10</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Deterministic>true</Deterministic>
+  </PropertyGroup>
+  <ItemGroup>
+	<Compile Include="..\TurnWarning\TurnBoundaryTracker.cs" Link="TurnBoundaryTracker.cs" />
+	<Compile Include="..\TurnWarning\PluginSettings.cs" Link="PluginSettings.cs" />
+	<Compile Include="..\TurnWarning\CombatResultTracker.cs" Link="CombatResultTracker.cs" />
+	<Compile Include="..\TurnWarning\MatchFoundPolicy.cs" Link="MatchFoundPolicy.cs" />
+	<Compile Include="..\TurnWarning\MatchFoundRequestState.cs" Link="MatchFoundRequestState.cs" />
+	<Compile Include="..\TurnWarning\WavFileValidator.cs" Link="WavFileValidator.cs" />
+  </ItemGroup>
+</Project>
