@@ -6,7 +6,7 @@ TurnWarning is a plugin for [Hearthstone Deck Tracker](https://github.com/Hearth
 
 ![TurnWarning notification styles](images/notification.PNG)
 
-![TurnWarning options](images/options.PNG)
+<img src="images/options.PNG" alt="TurnWarning options" width="560">
 
 ## Features
 
@@ -14,13 +14,11 @@ TurnWarning is a plugin for [Hearthstone Deck Tracker](https://github.com/Hearth
 - Notifies you when the first Recruit phase begins after hero selection.
 - Notifies you when a new Recruit phase starts after Combat.
 - Avoids warnings caused only by minimizing Hearthstone during an already active Recruit phase.
-- Automatically closes a notification after Hearthstone remains focused for one second.
 - Optionally shows the previous combat result and hero damage.
 - Colors wins green, losses red, and ties yellow.
 - Includes five combat-result layouts and standard or compact notification styles.
 - Supports notification pulsing, Hearthstone taskbar flashing, and custom WAV sounds.
 - Supports custom notification text, display duration, screen position, and monitor selection.
-- Includes a live test notification for previewing unsaved settings.
 
 ## How it works
 
@@ -45,9 +43,7 @@ Available options include:
 - Choose a standard or compact notification style.
 - Customize the title and message.
 - Set the display time from 2 to 60 seconds.
-- Set the focus-validation delay from 0 to 3000 milliseconds.
 - Preview unsaved settings with `TEST NOTIFICATION`.
-- Restore defaults with `Reset`, save without closing with `Apply`, or save and close with `OK`.
 
 Sound is disabled by default. Custom sounds must be uncompressed PCM WAV files no larger than 5 MB or 10 seconds, with mono or stereo audio at 8-96 kHz and 8, 16, 24, or 32 bits. If the selected file is missing or invalid, TurnWarning immediately falls back to the Windows system sound and does not delay the notification.
 
