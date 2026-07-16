@@ -22,10 +22,17 @@ namespace TurnWarning
 			Run("New combat invalidates pending token", NewCombatInvalidatesPendingToken);
 			Run("Old session token is rejected", OldSessionTokenIsRejected);
 			Run("Unsupported mode stays quiet", UnsupportedModeStaysQuiet);
+			Run("Combat boundary creates one notification token", CombatBoundaryCreatesOneNotificationToken);
+			Run("Transient Combat state cannot duplicate notification", TransientCombatStateCannotDuplicateNotification);
+			Run("Next valid Recruit phase rearms Combat notification", NextRecruitRearmsCombatNotification);
+			Run("Attach or reconnect during Combat creates no notification", AttachDuringCombatCreatesNoNotification);
+			Run("Late Battlegrounds classification arms future Combat", LateClassificationArmsFutureCombat);
+			Run("Combat warning requires an active away Battlegrounds battle", CombatWarningRequiresActiveAwayBattle);
 			Run("Default settings use English text and no sound", DefaultSettingsUseEnglishTextAndNoSound);
 			Run("Settings normalization clamps unsafe values", SettingsNormalizationClampsValues);
 			Run("Settings clone is independent", SettingsCloneIsIndependent);
 			Run("Settings XML round-trip preserves options", SettingsXmlRoundTripPreservesOptions);
+			Run("Older settings keep Combat warning disabled", OlderSettingsKeepCombatWarningDisabled);
 			Run("Legacy focus option is ignored during upgrade", LegacyFocusOptionIsIgnoredDuringUpgrade);
 			Run("Displayed version omits trailing zeros", DisplayedVersionOmitsTrailingZeros);
 			Run("Combat result reports a win and exact damage", CombatResultReportsWin);
@@ -149,6 +156,71 @@ namespace TurnWarning
 			Assert(tracker.OnPlayerTurnStarted(4, true, false, true) == null, "Only Battlegrounds is supported");
 		}
 
+		private static void CombatBoundaryCreatesOneNotificationToken()
+		{
+			var tracker = NewRecruitTracker();
+			Assert(tracker.Observe(true, true, true) == PhaseTransition.EnteredCombat,
+				"Expected a Recruit-to-Combat transition");
+			var token = tracker.OnCombatStarted();
+			Assert(token != null, "Expected one Combat notification token");
+			Assert(tracker.IsCurrentCombat(token!, true, true, true), "Combat token should remain current during Combat");
+			Assert(tracker.OnCombatStarted() == null, "The same Combat boundary must not create another token");
+		}
+
+		private static void TransientCombatStateCannotDuplicateNotification()
+		{
+			var tracker = NewRecruitTracker();
+			tracker.Observe(true, true, true);
+			var token = tracker.OnCombatStarted()!;
+			tracker.Observe(true, true, false);
+			Assert(!tracker.IsCurrentCombat(token, true, true, false), "Leaving Combat must invalidate a pending warning");
+			tracker.Observe(true, true, true);
+			Assert(tracker.OnCombatStarted() == null, "A transient phase toggle must not rearm the same battle");
+		}
+
+		private static void NextRecruitRearmsCombatNotification()
+		{
+			var tracker = NewRecruitTracker();
+			tracker.Observe(true, true, true);
+			Assert(tracker.OnCombatStarted() != null, "First battle should create a warning token");
+			Assert(tracker.OnPlayerTurnStarted(2, true, true, true) != null, "A valid Recruit boundary should be accepted");
+			tracker.Observe(true, true, false);
+			tracker.Observe(true, true, true);
+			Assert(tracker.OnCombatStarted() != null, "The next battle should create a new warning token");
+		}
+
+		private static void AttachDuringCombatCreatesNoNotification()
+		{
+			var attached = new TurnBoundaryTracker();
+			attached.Initialize(true, true, true, false);
+			Assert(attached.OnCombatStarted() == null, "Attaching during an active battle must stay quiet");
+
+			var reconnected = new TurnBoundaryTracker();
+			reconnected.Initialize(true, true, true, true);
+			Assert(reconnected.OnCombatStarted() == null, "Reconnect replay must stay quiet");
+		}
+
+		private static void LateClassificationArmsFutureCombat()
+		{
+			var tracker = new TurnBoundaryTracker();
+			tracker.OnGameStarted(false);
+			tracker.Observe(true, true, false);
+			tracker.Observe(true, true, true);
+			Assert(tracker.OnCombatStarted() != null, "Classification during Recruit should arm the future battle");
+		}
+
+		private static void CombatWarningRequiresActiveAwayBattle()
+		{
+			Assert(CombatNotificationPolicy.CanDeliver(true, true, true, false, true, true),
+				"An enabled active Battlegrounds battle while away should deliver");
+			Assert(!CombatNotificationPolicy.CanDeliver(false, true, true, false, true, true), "Disabled option must stay quiet");
+			Assert(!CombatNotificationPolicy.CanDeliver(true, true, true, false, true, false), "Focused Hearthstone must stay quiet");
+			Assert(!CombatNotificationPolicy.CanDeliver(true, true, true, true, true, true), "Spectator mode must stay quiet");
+			Assert(!CombatNotificationPolicy.CanDeliver(true, true, false, false, true, true), "Other game modes must stay quiet");
+			Assert(!CombatNotificationPolicy.CanDeliver(true, false, true, false, true, true), "Inactive matches must stay quiet");
+			Assert(!CombatNotificationPolicy.CanDeliver(true, true, true, false, false, true), "Recruit phase must stay quiet");
+		}
+
 		private static void DefaultSettingsUseEnglishTextAndNoSound()
 		{
 			var settings = new PluginSettings();
@@ -160,6 +232,7 @@ namespace TurnWarning
 			Assert(settings.Title == "Your turn has started", "Default title should be English");
 			Assert(settings.Message.StartsWith("Combat is over"), "Default message should be English");
 			Assert(settings.NotifyMatchFound, "Match found notifications should be enabled by default");
+			Assert(!settings.NotifyCombatStarted, "Combat-start notifications should be disabled by default");
 			Assert(settings.ShowCombatResult, "Combat result should be enabled by default");
 			Assert(settings.CombatResultStyle == CombatResultStyle.ResultPanel, "Result panel should be the default combat result style");
 			Assert(settings.PulseMode == NotificationPulseMode.UntilFocused, "Notification should pulse until focused by default");
@@ -199,6 +272,7 @@ namespace TurnWarning
 				ShowWindow = false,
 				PlaySound = true,
 				NotifyMatchFound = false,
+				NotifyCombatStarted = true,
 				ShowCombatResult = true,
 				CombatResultStyle = CombatResultStyle.TwoColumn,
 				SoundPath = "turn.wav",
@@ -223,15 +297,35 @@ namespace TurnWarning
 				Assert(restored.PulseMode == NotificationPulseMode.Brief, "Notification pulse mode should survive serialization");
 				Assert(restored.MonitorDeviceName == source.MonitorDeviceName, "Monitor should survive serialization");
 				Assert(restored.Title == source.Title && restored.DisplaySeconds == 12, "Text and duration should survive serialization");
-				Assert(!restored.NotifyMatchFound && restored.ShowCombatResult, "Event options should survive serialization");
+				Assert(!restored.NotifyMatchFound && restored.NotifyCombatStarted && restored.ShowCombatResult,
+					"Event options should survive serialization");
 				Assert(restored.CombatResultStyle == CombatResultStyle.TwoColumn, "Combat result style should survive serialization");
 			}
 		}
 
 		private static void DisplayedVersionOmitsTrailingZeros()
 		{
-			Assert(new Version(1, 0).ToString() == "1.0", "Plugin API version should be displayed without trailing zeros");
+			Assert(new Version(1, 1).ToString() == "1.1", "Plugin API version should be displayed without trailing zeros");
 			Assert(new Version(1, 3, 1).ToString() == "1.3.1", "Patch versions should retain meaningful components");
+		}
+
+		private static void OlderSettingsKeepCombatWarningDisabled()
+		{
+			var serializer = new XmlSerializer(typeof(PluginSettings));
+			string xml;
+			using(var writer = new StringWriter())
+			{
+				serializer.Serialize(writer, new PluginSettings());
+				xml = writer.ToString();
+			}
+			xml = xml.Replace("  <NotifyCombatStarted>false</NotifyCombatStarted>\r\n", string.Empty)
+				.Replace("  <NotifyCombatStarted>false</NotifyCombatStarted>\n", string.Empty);
+			Assert(!xml.Contains("NotifyCombatStarted"), "The compatibility fixture must omit the new setting");
+			using(var reader = new StringReader(xml))
+			{
+				var restored = (PluginSettings)serializer.Deserialize(reader)!;
+				Assert(!restored.NotifyCombatStarted, "Settings created before 1.1 must not enable Combat warnings");
+			}
 		}
 
 		private static void LegacyFocusOptionIsIgnoredDuringUpgrade()

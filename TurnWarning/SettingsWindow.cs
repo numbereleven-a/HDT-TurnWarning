@@ -18,6 +18,7 @@ namespace TurnWarning
 		private readonly CheckBox _showWindow = new CheckBox { Content = "Show notification window" };
 		private readonly CheckBox _playSound = new CheckBox { Content = "Play sound" };
 		private readonly CheckBox _notifyMatchFound = new CheckBox { Content = "Notify when a Battlegrounds match is found" };
+		private readonly CheckBox _notifyCombatStarted = new CheckBox { Content = "Notify when Combat starts" };
 		private readonly CheckBox _showCombatResult = new CheckBox { Content = "Include the previous combat result when available" };
 		private readonly TextBox _soundPath = new TextBox();
 		private readonly TextBox _title = new TextBox();
@@ -165,6 +166,7 @@ namespace TurnWarning
 			};
 			var panel = NewGroupPanel();
 			panel.Children.Add(_notifyMatchFound);
+			panel.Children.Add(_notifyCombatStarted);
 			panel.Children.Add(_showCombatResult);
 			panel.Children.Add(Labeled("Combat result appearance", _combatResultStyle));
 			return Group("Events", panel);
@@ -257,6 +259,7 @@ namespace TurnWarning
 			_showWindow.IsChecked = settings.ShowWindow;
 			_playSound.IsChecked = settings.PlaySound;
 			_notifyMatchFound.IsChecked = settings.NotifyMatchFound;
+			_notifyCombatStarted.IsChecked = settings.NotifyCombatStarted;
 			_showCombatResult.IsChecked = settings.ShowCombatResult;
 			Select(_combatResultStyle, settings.CombatResultStyle);
 			_soundPath.Text = settings.SoundPath;
@@ -362,6 +365,7 @@ namespace TurnWarning
 				ShowWindow = _showWindow.IsChecked == true,
 				PlaySound = _playSound.IsChecked == true,
 				NotifyMatchFound = _notifyMatchFound.IsChecked == true,
+				NotifyCombatStarted = _notifyCombatStarted.IsChecked == true,
 				ShowCombatResult = _showCombatResult.IsChecked == true,
 				CombatResultStyle = Selected<CombatResultStyle>(_combatResultStyle),
 				SoundPath = soundPath,

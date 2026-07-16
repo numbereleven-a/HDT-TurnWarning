@@ -28,12 +28,26 @@ namespace TurnWarning
 		public int Turn { get; }
 	}
 
+	internal sealed class CombatToken
+	{
+		public CombatToken(int session, int sequence)
+		{
+			Session = session;
+			Sequence = sequence;
+		}
+
+		public int Session { get; }
+		public int Sequence { get; }
+	}
+
 	internal sealed class TurnBoundaryTracker
 	{
 		private readonly object _gate = new object();
 		private int _session;
 		private int _lastProcessedTurn = -1;
 		private bool _combatArmed;
+		private bool _combatNotificationArmed;
+		private int _combatNotificationSequence;
 		private bool _lastObservedCombat;
 		private TurnPhase _phase = TurnPhase.OutOfGame;
 
@@ -59,6 +73,7 @@ namespace TurnWarning
 				}
 
 				_phase = isCombat ? TurnPhase.Combat : TurnPhase.Recruit;
+				_combatNotificationArmed = !isCombat;
 				// A reconnect can replay the current phase. Skip that boundary and arm only
 				// after a fresh Recruit -> Combat transition has been observed.
 				_combatArmed = isCombat && !isReconnect;
@@ -71,6 +86,7 @@ namespace TurnWarning
 			{
 				StartNewSession();
 				_phase = isBattlegrounds ? TurnPhase.Recruit : TurnPhase.Unknown;
+				_combatNotificationArmed = isBattlegrounds;
 			}
 		}
 
@@ -104,6 +120,14 @@ namespace TurnWarning
 					StartNewSession();
 					_phase = isCombat ? TurnPhase.Combat : TurnPhase.Recruit;
 					_combatArmed = false;
+					_combatNotificationArmed = !isCombat;
+					_lastObservedCombat = isCombat;
+					return PhaseTransition.None;
+				}
+				if(_phase == TurnPhase.Unknown)
+				{
+					_phase = isCombat ? TurnPhase.Combat : TurnPhase.Recruit;
+					_combatNotificationArmed = !isCombat;
 					_lastObservedCombat = isCombat;
 					return PhaseTransition.None;
 				}
@@ -130,6 +154,18 @@ namespace TurnWarning
 			}
 		}
 
+		public CombatToken? OnCombatStarted()
+		{
+			lock(_gate)
+			{
+				if(_phase != TurnPhase.Combat || !_lastObservedCombat || !_combatNotificationArmed)
+					return null;
+				_combatNotificationArmed = false;
+				_combatNotificationSequence++;
+				return new CombatToken(_session, _combatNotificationSequence);
+			}
+		}
+
 		public TurnToken? OnPlayerTurnStarted(int turn, bool matchActive, bool isBattlegrounds, bool isCombat)
 		{
 			lock(_gate)
@@ -145,7 +181,22 @@ namespace TurnWarning
 					return null;
 
 				_lastProcessedTurn = turn;
+				_combatNotificationArmed = true;
 				return new TurnToken(_session, turn);
+			}
+		}
+
+		public bool IsCurrentCombat(CombatToken token, bool matchActive, bool isBattlegrounds, bool isCombat)
+		{
+			lock(_gate)
+			{
+				return token.Session == _session
+					&& token.Sequence == _combatNotificationSequence
+					&& matchActive
+					&& isBattlegrounds
+					&& isCombat
+					&& _lastObservedCombat
+					&& _phase == TurnPhase.Combat;
 			}
 		}
 
@@ -168,6 +219,8 @@ namespace TurnWarning
 			_session++;
 			_lastProcessedTurn = -1;
 			_combatArmed = false;
+			_combatNotificationArmed = false;
+			_combatNotificationSequence = 0;
 			_lastObservedCombat = false;
 		}
 	}

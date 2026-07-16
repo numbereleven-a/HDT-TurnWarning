@@ -58,6 +58,7 @@ namespace TurnWarning
 		public bool ShowWindow { get; set; } = true;
 		public bool PlaySound { get; set; } = false;
 		public bool NotifyMatchFound { get; set; } = true;
+		public bool NotifyCombatStarted { get; set; } = false;
 		public bool ShowCombatResult { get; set; } = true;
 		public CombatResultStyle CombatResultStyle { get; set; } = CombatResultStyle.ResultPanel;
 		public string SoundPath { get; set; } = string.Empty;
@@ -79,6 +80,7 @@ namespace TurnWarning
 				ShowWindow = ShowWindow,
 				PlaySound = PlaySound,
 				NotifyMatchFound = NotifyMatchFound,
+				NotifyCombatStarted = NotifyCombatStarted,
 				ShowCombatResult = ShowCombatResult,
 				CombatResultStyle = CombatResultStyle,
 				SoundPath = SoundPath,

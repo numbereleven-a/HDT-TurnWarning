@@ -24,5 +24,8 @@ namespace TurnWarning
 
 		public static NotificationContent ForInitialRecruit()
 			=> new NotificationContent("Battlegrounds has started", "Hero selection is over - the Recruit phase has started");
+
+		public static NotificationContent ForCombat()
+			=> new NotificationContent("Combat has started", "The battle has begun");
 	}
 }

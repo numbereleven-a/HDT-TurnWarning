@@ -11,6 +11,7 @@
 	<Compile Include="..\TurnWarning\TurnBoundaryTracker.cs" Link="TurnBoundaryTracker.cs" />
 	<Compile Include="..\TurnWarning\PluginSettings.cs" Link="PluginSettings.cs" />
 	<Compile Include="..\TurnWarning\CombatResultTracker.cs" Link="CombatResultTracker.cs" />
+	<Compile Include="..\TurnWarning\CombatNotificationPolicy.cs" Link="CombatNotificationPolicy.cs" />
 	<Compile Include="..\TurnWarning\MatchFoundPolicy.cs" Link="MatchFoundPolicy.cs" />
 	<Compile Include="..\TurnWarning\MatchFoundRequestState.cs" Link="MatchFoundRequestState.cs" />
 	<Compile Include="..\TurnWarning\WavFileValidator.cs" Link="WavFileValidator.cs" />

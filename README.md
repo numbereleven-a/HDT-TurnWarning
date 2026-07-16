@@ -13,6 +13,7 @@ TurnWarning is a plugin for [Hearthstone Deck Tracker](https://github.com/Hearth
 - Notifies you when a Battlegrounds match reaches hero selection while Hearthstone is unfocused.
 - Notifies you when the first Recruit phase begins after hero selection.
 - Notifies you when a new Recruit phase starts after Combat.
+- Optionally alerts you when a Battlegrounds Combat phase begins.
 - Avoids warnings caused only by minimizing Hearthstone during an already active Recruit phase.
 - Optionally shows the previous combat result and hero damage.
 - Colors wins green, losses red, and ties yellow.

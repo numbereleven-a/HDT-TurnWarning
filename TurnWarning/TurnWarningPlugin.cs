@@ -11,7 +11,7 @@ namespace TurnWarning
 {
 	public sealed class TurnWarningPlugin : IPlugin
 	{
-		internal const string DisplayVersion = "1.0";
+		internal const string DisplayVersion = "1.1";
 		private readonly TurnBoundaryTracker _tracker = new TurnBoundaryTracker();
 		private readonly CombatResultTracker _combatResult = new CombatResultTracker();
 		private readonly MatchFoundRequestState _matchFound = new MatchFoundRequestState();
@@ -27,7 +27,7 @@ namespace TurnWarning
 		public string Description => "Warns when a Battlegrounds match or Recruit phase starts while Hearthstone is not focused.";
 		public string ButtonText => "Settings";
 		public string Author => "numbereleven-a";
-		public Version Version => new Version(1, 0);
+		public Version Version => new Version(1, 1);
 		public MenuItem MenuItem
 		{
 			get
@@ -125,6 +125,16 @@ namespace TurnWarning
 				_notifications?.CancelAll();
 				var opponentHero = game.Opponent?.Hero;
 				_combatResult.Begin(opponentHero != null && opponentHero.Health > 0);
+				var combatToken = _tracker.OnCombatStarted();
+				var settings = GetSettingsSnapshot();
+				if(combatToken != null
+					&& settings.NotifyCombatStarted
+					&& HearthstoneWindowState.IsAway(HearthstoneWindowState.GetStatus()))
+				{
+					_notifications?.Schedule(
+						NotificationContent.ForCombat(),
+						() => ValidatePendingCombat(combatToken));
+				}
 			}
 		}
 
@@ -302,6 +312,28 @@ namespace TurnWarning
 				isCombat: game.IsBattlegroundsCombatPhase))
 				return false;
 			return HearthstoneWindowState.IsAway(HearthstoneWindowState.GetStatus());
+		}
+
+		private bool ValidatePendingCombat(CombatToken token)
+		{
+			if(!_enabled)
+				return false;
+			var game = HdtCore.Game;
+			if(game == null)
+				return false;
+			if(!_tracker.IsCurrentCombat(
+				token,
+				matchActive: !game.IsInMenu,
+				isBattlegrounds: game.IsBattlegroundsMatch,
+				isCombat: game.IsBattlegroundsCombatPhase))
+				return false;
+			return CombatNotificationPolicy.CanDeliver(
+				enabled: GetSettingsSnapshot().NotifyCombatStarted,
+				matchActive: !game.IsInMenu,
+				isBattlegrounds: game.IsBattlegroundsMatch,
+				isSpectator: game.CurrentGameMode == GameMode.Spectator,
+				isCombat: game.IsBattlegroundsCombatPhase,
+				isAway: HearthstoneWindowState.IsAway(HearthstoneWindowState.GetStatus()));
 		}
 
 		private PluginSettings GetSettingsSnapshot()
