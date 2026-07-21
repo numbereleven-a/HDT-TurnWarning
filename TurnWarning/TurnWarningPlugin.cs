@@ -24,7 +24,8 @@ namespace TurnWarning
 		private MenuItem? _menuItem;
 
 		public string Name => "TurnWarning";
-		public string Description => "Warns when a Battlegrounds match or Recruit phase starts while Hearthstone is not focused.";
+		public string Description => "Warns when a Battlegrounds match or Recruit phase starts while Hearthstone is not focused.\n"
+			+ "GitHub: https://github.com/numbereleven-a/HDT-TurnWarning";
 		public string ButtonText => "Settings";
 		public string Author => "numbereleven-a";
 		public Version Version => new Version(1, 1);
