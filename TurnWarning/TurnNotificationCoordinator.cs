@@ -1,6 +1,7 @@
 using System;
 using System.Threading;
 using System.Windows.Threading;
+using Log = Hearthstone_Deck_Tracker.Utility.Logging.Log;
 
 namespace TurnWarning
 {
@@ -114,9 +115,12 @@ namespace TurnWarning
 					if(validate())
 						Deliver(settings, content, false);
 				}
-				catch
+				catch(Exception ex)
 				{
-					// A disappearing game process or shutting down dispatcher must not affect HDT.
+					Log.Error(
+						"TurnWarning: notification delivery failed (" + ex.GetType().Name + ").",
+						"TurnWarning",
+						string.Empty);
 				}
 			};
 			_pendingTimer.Start();
@@ -184,7 +188,20 @@ namespace TurnWarning
 				return;
 			try
 			{
-				_dispatcher.BeginInvoke(action);
+				_dispatcher.BeginInvoke(new Action(() =>
+				{
+					try
+					{
+						action();
+					}
+					catch(Exception ex)
+					{
+						Log.Error(
+							"TurnWarning: UI action failed (" + ex.GetType().Name + ").",
+							"TurnWarning",
+							string.Empty);
+					}
+				}));
 			}
 			catch(InvalidOperationException)
 			{

@@ -6,36 +6,37 @@ using Hearthstone_Deck_Tracker.API;
 using Hearthstone_Deck_Tracker.Enums;
 using Hearthstone_Deck_Tracker.Plugins;
 using HdtCore = Hearthstone_Deck_Tracker.API.Core;
+using Log = Hearthstone_Deck_Tracker.Utility.Logging.Log;
 
 namespace TurnWarning
 {
 	public sealed class TurnWarningPlugin : IPlugin
 	{
-		internal const string DisplayVersion = "1.1";
 		private readonly TurnBoundaryTracker _tracker = new TurnBoundaryTracker();
 		private readonly CombatResultTracker _combatResult = new CombatResultTracker();
 		private readonly MatchFoundRequestState _matchFound = new MatchFoundRequestState();
 		private readonly object _settingsGate = new object();
 		private volatile bool _enabled;
 		private int _initialRecruitHandled;
+		private DateTime _nextMatchFoundPollUtc = DateTime.MinValue;
 		private PluginSettings _settings = new PluginSettings();
 		private TurnNotificationCoordinator? _notifications;
 		private SettingsWindow? _settingsWindow;
 		private MenuItem? _menuItem;
 
-		public string Name => "TurnWarning";
+		public string Name => "Turn Warning";
 		public string Description => "Warns when a Battlegrounds match or Recruit phase starts while Hearthstone is not focused.\n"
 			+ "GitHub: https://github.com/numbereleven-a/HDT-TurnWarning";
 		public string ButtonText => "Settings";
 		public string Author => "numbereleven-a";
-		public Version Version => new Version(1, 1);
+		public Version Version => new Version(1, 2);
 		public MenuItem MenuItem
 		{
 			get
 			{
 				if(_menuItem != null)
 					return _menuItem;
-				_menuItem = new MenuItem { Header = "TurnWarning" };
+				_menuItem = new MenuItem { Header = "Turn Warning" };
 				_menuItem.Click += (_, _) => OpenSettings();
 				return _menuItem;
 			}
@@ -58,6 +59,7 @@ namespace TurnWarning
 				isCombat: game?.IsBattlegroundsCombatPhase == true,
 				isReconnect: game?.CurrentGameStats?.IsReconnect == true);
 			Volatile.Write(ref _initialRecruitHandled, game != null && !game.IsInMenu ? 1 : 0);
+			_nextMatchFoundPollUtc = DateTime.MinValue;
 			_combatResult.Reset();
 
 			GameEventBridge.Attach(this);
@@ -78,7 +80,20 @@ namespace TurnWarning
 			try
 			{
 				if(settingsWindow != null && !settingsWindow.Dispatcher.HasShutdownStarted)
-					settingsWindow.Dispatcher.BeginInvoke(new Action(settingsWindow.Close));
+					settingsWindow.Dispatcher.BeginInvoke(new Action(() =>
+					{
+						try
+						{
+							settingsWindow.Close();
+						}
+						catch(Exception ex)
+						{
+							Log.Error(
+								"TurnWarning: settings window close failed (" + ex.GetType().Name + ").",
+								"TurnWarning",
+								string.Empty);
+						}
+					}));
 			}
 			catch(InvalidOperationException)
 			{
@@ -98,7 +113,26 @@ namespace TurnWarning
 			var dispatcher = Application.Current?.Dispatcher;
 			if(dispatcher == null || dispatcher.HasShutdownStarted)
 				return;
-			dispatcher.BeginInvoke(new Action(ShowSettings));
+			try
+			{
+				dispatcher.BeginInvoke(new Action(() =>
+				{
+					try
+					{
+						ShowSettings();
+					}
+					catch(Exception ex)
+					{
+						Log.Error(
+							"TurnWarning: settings window failed (" + ex.GetType().Name + ").",
+							"TurnWarning",
+							string.Empty);
+					}
+				}));
+			}
+			catch(InvalidOperationException)
+			{
+			}
 		}
 
 		public void OnUpdate()
@@ -115,7 +149,14 @@ namespace TurnWarning
 				return;
 			}
 			if(game != null)
-				TryHandlePendingMatchFound(game);
+			{
+				var now = DateTime.UtcNow;
+				if(now >= _nextMatchFoundPollUtc)
+				{
+					_nextMatchFoundPollUtc = now.AddMilliseconds(250);
+					TryHandlePendingMatchFound(game);
+				}
+			}
 			var isCombat = game?.IsBattlegroundsCombatPhase == true;
 			var transition = _tracker.Observe(
 				matchActive: game != null && !game.IsInMenu,
@@ -147,6 +188,7 @@ namespace TurnWarning
 			_tracker.OnGameStarted(game?.IsBattlegroundsMatch == true);
 			_combatResult.Reset();
 			Volatile.Write(ref _initialRecruitHandled, 0);
+			_nextMatchFoundPollUtc = DateTime.MinValue;
 			var settings = GetSettingsSnapshot();
 			var shouldWait = game != null
 				&& settings.NotifyMatchFound
@@ -162,6 +204,7 @@ namespace TurnWarning
 			_tracker.OnGameEnded();
 			_combatResult.Reset();
 			Volatile.Write(ref _initialRecruitHandled, 1);
+			_nextMatchFoundPollUtc = DateTime.MinValue;
 			_matchFound.End();
 			_notifications?.CancelAll();
 			NotificationServices.StopHearthstoneFlash();
@@ -369,7 +412,8 @@ namespace TurnWarning
 			var window = new SettingsWindow(
 				GetSettingsSnapshot(),
 				SaveSettings,
-				settings => _notifications?.ShowTest(settings));
+				settings => _notifications?.ShowTest(settings),
+				Version);
 			try
 			{
 				var owner = Application.Current?.MainWindow;

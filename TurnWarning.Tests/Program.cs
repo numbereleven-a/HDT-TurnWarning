@@ -11,6 +11,10 @@ namespace TurnWarning
 		private static void Main()
 		{
 			Run("Combat -> Recruit creates one token", CombatToRecruitCreatesOneToken);
+			Run("Combat reset before event creates one token", CombatResetBeforeEventCreatesOneToken);
+			Run("Either event order suppresses duplicates", EitherEventOrderSuppressesDuplicates);
+			Run("Missed Recruit event cannot leak into next Combat", MissedRecruitEventCannotLeakIntoNextCombat);
+			Run("Reconnect reset and event remain quiet", ReconnectResetAndEventRemainQuiet);
 			Run("Duplicate turn event is suppressed", DuplicateTurnIsSuppressed);
 			Run("Stale combat sample cannot rearm a handled boundary", StaleCombatSampleCannotRearmHandledBoundary);
 			Run("Next combat allows next warning", NextCombatAllowsNextWarning);
@@ -52,6 +56,9 @@ namespace TurnWarning
 			Run("Long PCM WAV is rejected", LongPcmWavIsRejected);
 			Run("Truncated WAV data is rejected", TruncatedWavDataIsRejected);
 			Run("Invalid WAV path is rejected without throwing", InvalidWavPathIsRejectedWithoutThrowing);
+			Run("Update repository validation is strict", UpdateRepositoryValidationIsStrict);
+			Run("Release tags accept supported version forms", ReleaseTagsAcceptSupportedForms);
+			Run("Version comparison normalizes missing components", VersionComparisonNormalizesMissingComponents);
 
 			Console.WriteLine($"All {_passed} TurnWarning state-machine tests passed.");
 		}
@@ -63,6 +70,48 @@ namespace TurnWarning
 			var token = tracker.OnPlayerTurnStarted(2, true, true, true);
 			Assert(token != null, "Expected a token");
 			Assert(tracker.IsCurrent(token!, 2, true, true, false), "Token should be current after transition");
+		}
+
+		private static void CombatResetBeforeEventCreatesOneToken()
+		{
+			var tracker = NewRecruitTracker();
+			tracker.Observe(true, true, true);
+			tracker.Observe(true, true, false);
+			var token = tracker.OnPlayerTurnStarted(2, true, true, false);
+			Assert(token != null, "Expected a token after HDT resets the Combat flag first");
+			Assert(tracker.IsCurrent(token!, 2, true, true, false), "Token should remain current in Recruit");
+		}
+
+		private static void EitherEventOrderSuppressesDuplicates()
+		{
+			var beforeReset = NewRecruitTracker();
+			beforeReset.Observe(true, true, true);
+			Assert(beforeReset.OnPlayerTurnStarted(2, true, true, true) != null, "Event-before-reset should pass");
+			beforeReset.Observe(true, true, false);
+			Assert(beforeReset.OnPlayerTurnStarted(2, true, true, false) == null, "Event-before-reset duplicate should fail");
+
+			var afterReset = NewRecruitTracker();
+			afterReset.Observe(true, true, true);
+			afterReset.Observe(true, true, false);
+			Assert(afterReset.OnPlayerTurnStarted(2, true, true, false) != null, "Event-after-reset should pass");
+			Assert(afterReset.OnPlayerTurnStarted(2, true, true, false) == null, "Event-after-reset duplicate should fail");
+		}
+
+		private static void MissedRecruitEventCannotLeakIntoNextCombat()
+		{
+			var tracker = NewRecruitTracker();
+			tracker.Observe(true, true, true);
+			tracker.Observe(true, true, false);
+			tracker.Observe(true, true, true);
+			Assert(tracker.OnPlayerTurnStarted(3, true, true, true) != null, "Only the new Combat boundary should be accepted");
+		}
+
+		private static void ReconnectResetAndEventRemainQuiet()
+		{
+			var tracker = new TurnBoundaryTracker();
+			tracker.Initialize(true, true, true, true);
+			tracker.Observe(true, true, false);
+			Assert(tracker.OnPlayerTurnStarted(5, true, true, false) == null, "Reconnect replay must stay quiet after reset");
 		}
 
 		private static void DuplicateTurnIsSuppressed()
@@ -236,6 +285,7 @@ namespace TurnWarning
 			Assert(settings.ShowCombatResult, "Combat result should be enabled by default");
 			Assert(settings.CombatResultStyle == CombatResultStyle.ResultPanel, "Result panel should be the default combat result style");
 			Assert(settings.PulseMode == NotificationPulseMode.UntilFocused, "Notification should pulse until focused by default");
+			Assert(settings.PulseIntervalMs == 1000, "Default pulse interval should be one second");
 			Assert(settings.Style == NotificationStyle.Compact, "Compact notification should be the default style");
 			Assert(settings.DisplaySeconds == 10, "Default display time should be 10 seconds");
 		}
@@ -247,11 +297,13 @@ namespace TurnWarning
 				Title = " ",
 				Message = string.Empty,
 				DisplaySeconds = 100,
+				PulseIntervalMs = 100,
 				StabilizationDelayMs = -10,
 				SoundPath = "  sound.wav  "
 			};
 			settings.Normalize();
 			Assert(settings.DisplaySeconds == 60, "Duration should be clamped");
+			Assert(settings.PulseIntervalMs == 300, "Pulse interval should be clamped");
 			Assert(settings.StabilizationDelayMs == 0, "Delay should be clamped");
 			Assert(settings.Title.Length > 0 && settings.Message.Length > 0, "Default text should be restored");
 			Assert(settings.SoundPath == "sound.wav", "Paths should be trimmed");
@@ -278,6 +330,7 @@ namespace TurnWarning
 				SoundPath = "turn.wav",
 				FlashMode = TaskbarFlashMode.UntilFocused,
 				PulseMode = NotificationPulseMode.Brief,
+				PulseIntervalMs = 1250,
 				MonitorMode = NotificationMonitorMode.Specific,
 				MonitorDeviceName = "DISPLAY2",
 				Position = NotificationPosition.TopLeft,
@@ -295,6 +348,7 @@ namespace TurnWarning
 				var restored = (PluginSettings)serializer.Deserialize(stream)!;
 				Assert(restored.FlashMode == source.FlashMode, "Flash mode should survive serialization");
 				Assert(restored.PulseMode == NotificationPulseMode.Brief, "Notification pulse mode should survive serialization");
+				Assert(restored.PulseIntervalMs == 1250, "Pulse interval should survive serialization");
 				Assert(restored.MonitorDeviceName == source.MonitorDeviceName, "Monitor should survive serialization");
 				Assert(restored.Title == source.Title && restored.DisplaySeconds == 12, "Text and duration should survive serialization");
 				Assert(!restored.NotifyMatchFound && restored.NotifyCombatStarted && restored.ShowCombatResult,
@@ -319,12 +373,16 @@ namespace TurnWarning
 				xml = writer.ToString();
 			}
 			xml = xml.Replace("  <NotifyCombatStarted>false</NotifyCombatStarted>\r\n", string.Empty)
-				.Replace("  <NotifyCombatStarted>false</NotifyCombatStarted>\n", string.Empty);
+				.Replace("  <NotifyCombatStarted>false</NotifyCombatStarted>\n", string.Empty)
+				.Replace("  <PulseIntervalMs>1000</PulseIntervalMs>\r\n", string.Empty)
+				.Replace("  <PulseIntervalMs>1000</PulseIntervalMs>\n", string.Empty);
 			Assert(!xml.Contains("NotifyCombatStarted"), "The compatibility fixture must omit the new setting");
+			Assert(!xml.Contains("PulseIntervalMs"), "The compatibility fixture must omit the pulse interval");
 			using(var reader = new StringReader(xml))
 			{
 				var restored = (PluginSettings)serializer.Deserialize(reader)!;
 				Assert(!restored.NotifyCombatStarted, "Settings created before 1.1 must not enable Combat warnings");
+				Assert(restored.PulseIntervalMs == 1000, "Older settings should use the default pulse interval");
 			}
 		}
 
@@ -513,6 +571,39 @@ namespace TurnWarning
 		{
 			var result = WavFileValidator.TryValidate("invalid\0path.wav", out var error);
 			Assert(!result && !string.IsNullOrEmpty(error), "An invalid path should return a validation error");
+		}
+
+		private static void UpdateRepositoryValidationIsStrict()
+		{
+			Assert(VersionChecker.IsValidRepository("numbereleven-a/HDT-TurnWarning"), "Expected owner/repository");
+			Assert(!VersionChecker.IsValidRepository("https://github.com/owner/repository"), "URLs must be rejected");
+			Assert(!VersionChecker.IsValidRepository("owner/repository/extra"), "Extra path segments must be rejected");
+			Assert(!VersionChecker.IsValidRepository("owner/repository?x=1"), "Query strings must be rejected");
+		}
+
+		private static void ReleaseTagsAcceptSupportedForms()
+		{
+			Assert(VersionChecker.TryParseReleaseVersion("v2.8", out var shortVersion, out var shortDisplay),
+				"A leading v and two components should be accepted");
+			Assert(shortDisplay == "2.8" && shortVersion == new Version(2, 8), "The clean tag should be displayed");
+			Assert(VersionChecker.TryParseReleaseVersion("2.8.1.0", out _, out _), "Four components should be accepted");
+			Assert(VersionChecker.TryParseReleaseVersion("v2.8.1-beta.1", out var prerelease, out var prereleaseDisplay),
+				"A SemVer suffix should be accepted");
+			Assert(prerelease == new Version(2, 8, 1) && prereleaseDisplay == "2.8.1-beta.1",
+				"The suffix should be displayed but ignored for numeric comparison");
+			Assert(!VersionChecker.TryParseReleaseVersion("release-2.8", out _, out _), "Unsupported tags must be rejected");
+		}
+
+		private static void VersionComparisonNormalizesMissingComponents()
+		{
+			Assert(VersionChecker.Compare(new Version(2, 8), new Version(2, 8, 0, 0)) == 0,
+				"Missing build and revision should be zero");
+			Assert(VersionChecker.Compare(new Version(2, 8, 1), new Version(2, 8)) > 0,
+				"A newer release should compare higher");
+			Assert(VersionChecker.Compare(new Version(2, 7, 9), new Version(2, 8)) < 0,
+				"An older release should compare lower");
+			Assert(VersionChecker.ToDisplayVersion(new Version(1, 1, 0, 0)) == "1.1",
+				"Installed versions should omit trailing zeros");
 		}
 
 		private static void WritePcmWav(string path, int seconds)

@@ -29,7 +29,7 @@ Pending and visible warnings are cancelled when they are no longer relevant, inc
 
 ## Configuration
 
-Open the settings from `Plugins -> TurnWarning` in HDT, or use the `Settings` button in HDT's plugin list.
+Open the settings from `Plugins -> Turn Warning` in HDT, or use the `Settings` button in HDT's plugin list.
 
 Available options include:
 
@@ -55,14 +55,14 @@ Sound is disabled by default. Custom sounds must be uncompressed PCM WAV files n
 1. Download `TurnWarning.zip` from the [latest release](https://github.com/numbereleven-a/HDT-TurnWarning/releases/latest).
 2. Open HDT and go to `Options -> Tracker -> Plugins`.
 3. Drag and drop the ZIP file onto the plugins page, or use HDT's plugin installation control if available.
-4. Enable TurnWarning and restart HDT if requested.
+4. Enable Turn Warning and restart HDT if requested.
 
 ### Manual installation
 
 1. Close HDT.
 2. Create `%AppData%\HearthstoneDeckTracker\Plugins\TurnWarning`.
 3. Copy `TurnWarning.dll` into that folder.
-4. Start HDT and enable TurnWarning under `Options -> Tracker -> Plugins`.
+4. Start HDT and enable Turn Warning under `Options -> Tracker -> Plugins`.
 
 Restart HDT after replacing the DLL during an update.
 

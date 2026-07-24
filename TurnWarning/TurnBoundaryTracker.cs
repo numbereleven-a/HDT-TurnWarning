@@ -46,6 +46,7 @@ namespace TurnWarning
 		private int _session;
 		private int _lastProcessedTurn = -1;
 		private bool _combatArmed;
+		private bool _recruitBoundaryArmed;
 		private bool _combatNotificationArmed;
 		private int _combatNotificationSequence;
 		private bool _lastObservedCombat;
@@ -140,13 +141,13 @@ namespace TurnWarning
 				{
 					_phase = TurnPhase.Combat;
 					_combatArmed = true;
+					_recruitBoundaryArmed = false;
 					return PhaseTransition.EnteredCombat;
 				}
 				else if(leftCombat)
 				{
-					// If the public turn event was missed, do not carry an armed combat
-					// into a later duplicate event.
 					_phase = TurnPhase.Recruit;
+					_recruitBoundaryArmed = _combatArmed;
 					_combatArmed = false;
 					return PhaseTransition.EnteredRecruit;
 				}
@@ -170,11 +171,14 @@ namespace TurnWarning
 		{
 			lock(_gate)
 			{
-				if(!matchActive || !isBattlegrounds || !isCombat || _phase != TurnPhase.Combat)
+				if(!matchActive || !isBattlegrounds)
 					return null;
 
-				var wasArmed = _combatArmed;
+				var wasArmed = _phase == TurnPhase.Combat
+					? _combatArmed
+					: _phase == TurnPhase.Recruit && _recruitBoundaryArmed;
 				_combatArmed = false;
+				_recruitBoundaryArmed = false;
 				_phase = TurnPhase.Recruit;
 
 				if(!wasArmed || turn <= 1 || turn == _lastProcessedTurn)
@@ -219,6 +223,7 @@ namespace TurnWarning
 			_session++;
 			_lastProcessedTurn = -1;
 			_combatArmed = false;
+			_recruitBoundaryArmed = false;
 			_combatNotificationArmed = false;
 			_combatNotificationSequence = 0;
 			_lastObservedCombat = false;

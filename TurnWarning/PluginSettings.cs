@@ -64,6 +64,7 @@ namespace TurnWarning
 		public string SoundPath { get; set; } = string.Empty;
 		public TaskbarFlashMode FlashMode { get; set; } = TaskbarFlashMode.None;
 		public NotificationPulseMode PulseMode { get; set; } = NotificationPulseMode.UntilFocused;
+		public int PulseIntervalMs { get; set; } = 1000;
 		public NotificationMonitorMode MonitorMode { get; set; } = NotificationMonitorMode.ActiveWindow;
 		public string MonitorDeviceName { get; set; } = string.Empty;
 		public NotificationPosition Position { get; set; } = NotificationPosition.BottomRight;
@@ -86,6 +87,7 @@ namespace TurnWarning
 				SoundPath = SoundPath,
 				FlashMode = FlashMode,
 				PulseMode = PulseMode,
+				PulseIntervalMs = PulseIntervalMs,
 				MonitorMode = MonitorMode,
 				MonitorDeviceName = MonitorDeviceName,
 				Position = Position,
@@ -105,6 +107,7 @@ namespace TurnWarning
 			Message = string.IsNullOrWhiteSpace(Message) ? DefaultMessage : Message.Trim();
 			DisplaySeconds = Math.Max(2, Math.Min(60, DisplaySeconds));
 			StabilizationDelayMs = Math.Max(0, Math.Min(3000, StabilizationDelayMs));
+			PulseIntervalMs = Math.Max(300, Math.Min(2000, PulseIntervalMs));
 		}
 	}
 

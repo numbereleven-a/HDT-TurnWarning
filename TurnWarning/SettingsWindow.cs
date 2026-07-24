@@ -1,13 +1,17 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Documents;
 using System.Windows.Media;
 using Forms = System.Windows.Forms;
 using Microsoft.Win32;
+using Log = Hearthstone_Deck_Tracker.Utility.Logging.Log;
 
 namespace TurnWarning
 {
@@ -15,6 +19,8 @@ namespace TurnWarning
 	{
 		private readonly Action<PluginSettings> _save;
 		private readonly Action<PluginSettings> _preview;
+		private readonly Version _installedVersion;
+		private readonly string _baseVersionText;
 		private readonly CheckBox _showWindow = new CheckBox { Content = "Show notification window" };
 		private readonly CheckBox _playSound = new CheckBox { Content = "Play sound" };
 		private readonly CheckBox _notifyMatchFound = new CheckBox { Content = "Notify when a Battlegrounds match is found" };
@@ -25,6 +31,7 @@ namespace TurnWarning
 		private readonly TextBox _message = new TextBox();
 		private readonly TextBox _displaySeconds = new TextBox();
 		private readonly TextBox _delayMs = new TextBox();
+		private readonly TextBox _pulseIntervalMs = new TextBox();
 		private readonly ComboBox _flashMode = NewCombo();
 		private readonly ComboBox _pulseMode = NewCombo();
 		private readonly ComboBox _monitor = NewCombo();
@@ -38,14 +45,37 @@ namespace TurnWarning
 			Margin = new Thickness(16, 0, 16, 0)
 		};
 		private readonly List<MonitorChoice> _monitorChoices = new List<MonitorChoice>();
+		private readonly TextBlock _versionText = new TextBlock
+		{
+			VerticalAlignment = VerticalAlignment.Center,
+			Foreground = Brushes.DimGray
+		};
+		private readonly Button _checkUpdatesButton = new Button
+		{
+			Content = "↻",
+			Width = 22,
+			Height = 20,
+			Margin = new Thickness(0, 0, 6, 0),
+			Padding = new Thickness(0),
+			ToolTip = "Check for updates"
+		};
+		private CancellationTokenSource? _updateCheckCancellation;
 		private bool _soundOperationInProgress;
 		private bool _closed;
 
-		public SettingsWindow(PluginSettings settings, Action<PluginSettings> save, Action<PluginSettings> preview)
+		public SettingsWindow(
+			PluginSettings settings,
+			Action<PluginSettings> save,
+			Action<PluginSettings> preview,
+			Version installedVersion)
 		{
 			_save = save;
 			_preview = preview;
-			Title = "TurnWarning Settings";
+			_installedVersion = installedVersion;
+			_baseVersionText = "Version " + VersionChecker.ToDisplayVersion(installedVersion);
+			_versionText.Text = _baseVersionText;
+			_checkUpdatesButton.Click += (_, _) => CheckForUpdates();
+			Title = "Turn Warning Settings";
 			Width = 760;
 			MinWidth = 580;
 			MinHeight = 520;
@@ -58,6 +88,7 @@ namespace TurnWarning
 			Closed += (_, _) =>
 			{
 				_closed = true;
+				_updateCheckCancellation?.Cancel();
 				NotificationServices.ClearPreviewSound();
 			};
 		}
@@ -74,13 +105,7 @@ namespace TurnWarning
 			content.Children.Add(BuildPlacementGroup());
 			content.Children.Add(BuildTextGroup());
 			content.Children.Add(BuildTimingGroup());
-			content.Children.Add(new TextBlock
-			{
-				Text = "Custom audio supports uncompressed PCM WAV files up to 5 MB and 10 seconds. Leave the path empty to use the Windows system sound. If a custom sound is unavailable or still loading, the Windows system sound is used instead. Taskbar flashing never activates the game.",
-				TextWrapping = TextWrapping.Wrap,
-				Foreground = Brushes.DimGray,
-				Margin = new Thickness(2, 6, 2, 8)
-			});
+			content.Children.Add(BuildResetSection());
 			var scroll = new ScrollViewer
 			{
 				VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
@@ -103,13 +128,17 @@ namespace TurnWarning
 			grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 			grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-			var version = new TextBlock
+			var versionPanel = new Grid
 			{
-				Text = "Version " + TurnWarningPlugin.DisplayVersion,
 				VerticalAlignment = VerticalAlignment.Center,
-				Foreground = Brushes.DimGray
+				Width = 285
 			};
-			grid.Children.Add(version);
+			versionPanel.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+			versionPanel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+			versionPanel.Children.Add(_checkUpdatesButton);
+			Grid.SetColumn(_versionText, 1);
+			versionPanel.Children.Add(_versionText);
+			grid.Children.Add(versionPanel);
 			Grid.SetColumn(_status, 1);
 			grid.Children.Add(_status);
 
@@ -132,13 +161,7 @@ namespace TurnWarning
 			apply.Margin = new Thickness(8, 0, 0, 0);
 			apply.Click += (_, _) => Apply(closeAfterSave: false);
 
-			var reset = NewButton("Reset", 82);
-			reset.Margin = new Thickness(8, 0, 0, 0);
-			reset.ToolTip = "Load default values without saving them";
-			reset.Click += (_, _) => ResetToDefaults();
-
 			buttons.Children.Add(test);
-			buttons.Children.Add(reset);
 			buttons.Children.Add(ok);
 			buttons.Children.Add(cancel);
 			buttons.Children.Add(apply);
@@ -152,6 +175,92 @@ namespace TurnWarning
 				Background = new SolidColorBrush(Color.FromRgb(247, 247, 247)),
 				Child = grid
 			};
+		}
+
+		private async void CheckForUpdates()
+		{
+			if(_closed || !_checkUpdatesButton.IsEnabled)
+				return;
+
+			var cancellation = new CancellationTokenSource();
+			_updateCheckCancellation = cancellation;
+			_checkUpdatesButton.IsEnabled = false;
+			SetVersionText(_baseVersionText + " — checking...");
+			try
+			{
+				var repository = Environment.GetEnvironmentVariable("HDT_TURNWARNING_UPDATE_REPOSITORY");
+				if(string.IsNullOrWhiteSpace(repository))
+					repository = "numbereleven-a/HDT-TurnWarning";
+				var token = Environment.GetEnvironmentVariable("HDT_TURNWARNING_UPDATE_TOKEN");
+				var result = await VersionChecker.CheckAsync(repository, token, _installedVersion, cancellation.Token);
+				if(_closed || cancellation.IsCancellationRequested)
+					return;
+				if(result.UpdateAvailable)
+					ShowAvailableUpdate(result.LatestDisplayVersion, repository);
+				else
+					SetVersionText(_baseVersionText + " — latest");
+			}
+			catch(OperationCanceledException) when(_closed || cancellation.IsCancellationRequested)
+			{
+			}
+			catch(Exception ex)
+			{
+				if(!_closed)
+				{
+					SetVersionText(_baseVersionText + " — check failed");
+					Log.Warn(
+						"TurnWarning: update check failed (" + ex.GetType().Name + ").",
+						"TurnWarning",
+						string.Empty);
+				}
+			}
+			finally
+			{
+				if(ReferenceEquals(_updateCheckCancellation, cancellation))
+					_updateCheckCancellation = null;
+				if(!_closed)
+					_checkUpdatesButton.IsEnabled = true;
+				cancellation.Dispose();
+			}
+		}
+
+		private void SetVersionText(string text)
+		{
+			_versionText.Inlines.Clear();
+			_versionText.Text = text;
+			_versionText.ToolTip = null;
+		}
+
+		private void ShowAvailableUpdate(string latestVersion, string repository)
+		{
+			_versionText.Inlines.Clear();
+			_versionText.Inlines.Add(new Run(_baseVersionText + " — "));
+			var link = new Hyperlink(new Run("update " + latestVersion + " available"))
+			{
+				ToolTip = "Open the latest release download page"
+			};
+			link.Click += (_, _) => OpenLatestRelease(repository);
+			_versionText.Inlines.Add(link);
+			_versionText.ToolTip = "Click the update link to open the latest release download page.";
+		}
+
+		private static void OpenLatestRelease(string repository)
+		{
+			try
+			{
+				Process.Start(new ProcessStartInfo
+				{
+					FileName = "https://github.com/" + repository + "/releases/latest",
+					UseShellExecute = true
+				});
+			}
+			catch(Exception ex)
+			{
+				Log.Warn(
+					"TurnWarning: release page could not be opened (" + ex.GetType().Name + ").",
+					"TurnWarning",
+					string.Empty);
+			}
 		}
 
 		private GroupBox BuildEventsGroup()
@@ -190,7 +299,9 @@ namespace TurnWarning
 			panel.Children.Add(_showWindow);
 			panel.Children.Add(_playSound);
 			panel.Children.Add(Labeled("Notification window effect", _pulseMode));
-			panel.Children.Add(Labeled("Hearthstone taskbar button", _flashMode));
+			var flashSetting = Labeled("Hearthstone taskbar button", _flashMode);
+			flashSetting.ToolTip = "Taskbar flashing never activates the game.";
+			panel.Children.Add(flashSetting);
 
 			var browse = NewButton("Browse...", 90);
 			browse.Margin = new Thickness(8, 0, 0, 0);
@@ -199,7 +310,10 @@ namespace TurnWarning
 			DockPanel.SetDock(browse, Dock.Right);
 			soundRow.Children.Add(browse);
 			soundRow.Children.Add(_soundPath);
-			panel.Children.Add(Labeled("Custom WAV file", soundRow));
+			panel.Children.Add(Labeled(
+				"Custom WAV file",
+				soundRow,
+				"Custom audio supports uncompressed PCM WAV files up to 5 MB and 10 seconds. Leave the path empty to use the Windows system sound. If a custom sound is unavailable or still loading, the Windows system sound is used instead."));
 			return Group("Notification methods", panel);
 		}
 
@@ -250,8 +364,22 @@ namespace TurnWarning
 		{
 			var panel = NewGroupPanel();
 			panel.Children.Add(Labeled("Display time, seconds (2-60)", _displaySeconds));
+			panel.Children.Add(Labeled("Pulse interval, ms (300-2000)", _pulseIntervalMs));
 			panel.Children.Add(Labeled("Focus validation delay, ms (0-3000)", _delayMs));
 			return Group("Timing", panel);
+		}
+
+		private UIElement BuildResetSection()
+		{
+			var reset = NewButton("Reset to defaults", 140);
+			reset.HorizontalAlignment = HorizontalAlignment.Left;
+			reset.ToolTip = "Load default values without saving them";
+			reset.Click += (_, _) => ResetToDefaults();
+			return new Border
+			{
+				Margin = new Thickness(2, 2, 0, 8),
+				Child = reset
+			};
 		}
 
 		private void LoadSettings(PluginSettings settings)
@@ -266,6 +394,7 @@ namespace TurnWarning
 			_title.Text = settings.Title;
 			_message.Text = settings.Message;
 			_displaySeconds.Text = settings.DisplaySeconds.ToString();
+			_pulseIntervalMs.Text = settings.PulseIntervalMs.ToString();
 			_delayMs.Text = settings.StabilizationDelayMs.ToString();
 			Select(_flashMode, settings.FlashMode);
 			Select(_pulseMode, settings.PulseMode);
@@ -314,7 +443,7 @@ namespace TurnWarning
 			}
 			catch(Exception ex)
 			{
-				MessageBox.Show(this, "Could not test the notification: " + ex.Message, "TurnWarning", MessageBoxButton.OK, MessageBoxImage.Error);
+				MessageBox.Show(this, "Could not test the notification: " + ex.Message, "Turn Warning", MessageBoxButton.OK, MessageBoxImage.Error);
 			}
 			finally
 			{
@@ -343,7 +472,7 @@ namespace TurnWarning
 			}
 			catch(Exception ex)
 			{
-				MessageBox.Show(this, "Could not save settings: " + ex.Message, "TurnWarning", MessageBoxButton.OK, MessageBoxImage.Error);
+				MessageBox.Show(this, "Could not save settings: " + ex.Message, "Turn Warning", MessageBoxButton.OK, MessageBoxImage.Error);
 			}
 			finally
 			{
@@ -358,6 +487,8 @@ namespace TurnWarning
 				return ValidationError("Display time must be between 2 and 60 seconds.");
 			if(!int.TryParse(_delayMs.Text, out var delay) || delay < 0 || delay > 3000)
 				return ValidationError("Focus validation delay must be between 0 and 3000 ms.");
+			if(!int.TryParse(_pulseIntervalMs.Text, out var pulseInterval) || pulseInterval < 300 || pulseInterval > 2000)
+				return ValidationError("Pulse interval must be between 300 and 2000 ms.");
 			var soundPath = _soundPath.Text.Trim();
 			var monitor = _monitor.SelectedItem as MonitorChoice ?? _monitorChoices[0];
 			settings = new PluginSettings
@@ -371,6 +502,7 @@ namespace TurnWarning
 				SoundPath = soundPath,
 				FlashMode = Selected<TaskbarFlashMode>(_flashMode),
 				PulseMode = Selected<NotificationPulseMode>(_pulseMode),
+				PulseIntervalMs = pulseInterval,
 				MonitorMode = monitor.Mode,
 				MonitorDeviceName = monitor.DeviceName,
 				Position = Selected<NotificationPosition>(_position),
@@ -413,7 +545,7 @@ namespace TurnWarning
 		private bool ValidationError(string message)
 		{
 			_status.Text = string.Empty;
-			MessageBox.Show(this, message, "TurnWarning", MessageBoxButton.OK, MessageBoxImage.Warning);
+			MessageBox.Show(this, message, "Turn Warning", MessageBoxButton.OK, MessageBoxImage.Warning);
 			return false;
 		}
 
@@ -422,14 +554,48 @@ namespace TurnWarning
 		private static StackPanel NewGroupPanel() => new StackPanel { Margin = new Thickness(10, 6, 10, 8) };
 		private static GroupBox Group(string title, UIElement content) => new GroupBox { Header = title, Content = content, Margin = new Thickness(0, 0, 0, 8) };
 
-		private static FrameworkElement Labeled(string label, UIElement control)
+		private static FrameworkElement Labeled(string label, UIElement control, string? helpText = null)
 		{
 			var grid = new Grid { Margin = new Thickness(0, 3, 0, 3) };
 			grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(230) });
 			grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 			var text = new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 12, 0) };
 			Grid.SetColumn(control, 1);
-			grid.Children.Add(text);
+			if(string.IsNullOrEmpty(helpText))
+			{
+				grid.Children.Add(text);
+			}
+			else
+			{
+				text.Margin = new Thickness(0);
+				var help = new Button
+				{
+					Content = "?",
+					Width = 20,
+					Height = 20,
+					Margin = new Thickness(6, 0, 12, 0),
+					Padding = new Thickness(0),
+					Focusable = false,
+					FontWeight = FontWeights.SemiBold,
+					Foreground = Brushes.DimGray,
+					VerticalAlignment = VerticalAlignment.Center,
+					ToolTip = new ToolTip
+					{
+						Content = new TextBlock
+						{
+							Text = helpText,
+							MaxWidth = 420,
+							TextWrapping = TextWrapping.Wrap
+						}
+					}
+				};
+				ToolTipService.SetInitialShowDelay(help, 150);
+				ToolTipService.SetShowDuration(help, 20000);
+				var labelPanel = new StackPanel { Orientation = Orientation.Horizontal };
+				labelPanel.Children.Add(text);
+				labelPanel.Children.Add(help);
+				grid.Children.Add(labelPanel);
+			}
 			grid.Children.Add(control);
 			return grid;
 		}

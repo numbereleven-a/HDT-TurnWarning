@@ -15,5 +15,6 @@
 	<Compile Include="..\TurnWarning\MatchFoundPolicy.cs" Link="MatchFoundPolicy.cs" />
 	<Compile Include="..\TurnWarning\MatchFoundRequestState.cs" Link="MatchFoundRequestState.cs" />
 	<Compile Include="..\TurnWarning\WavFileValidator.cs" Link="WavFileValidator.cs" />
+	<Compile Include="..\TurnWarning\VersionChecker.cs" Link="VersionChecker.cs" />
   </ItemGroup>
 </Project>

@@ -235,19 +235,14 @@ namespace TurnWarning
 			var handle = new WindowInteropHelper(this).Handle;
 			var style = GetWindowLongPtr(handle, GwlExStyle).ToInt64();
 			SetWindowLongPtr(handle, GwlExStyle, new IntPtr(style | WsExNoActivate | WsExToolWindow));
+			PositionWindow(handle);
 		}
 
 		private void OnContentRendered(object? sender, EventArgs e)
 		{
-			var handle = new WindowInteropHelper(this).Handle;
-			if(GetWindowRect(handle, out var rect))
-			{
-				var area = ResolveScreen(_settings).WorkingArea;
-				var width = rect.Right - rect.Left;
-				var height = rect.Bottom - rect.Top;
-				var point = ResolvePosition(area, width, height, _settings.Position);
-				SetWindowPos(handle, HwndTopmost, point.X, point.Y, 0, 0, SwpNoSize | SwpNoActivate);
-			}
+			// Recheck after layout as a fallback. The initial position is already set
+			// in SourceInitialized, before the window becomes visible.
+			PositionWindow(new WindowInteropHelper(this).Handle);
 			_closeTimer.Start();
 			StartPulseEffect();
 			_focusTimer = new DispatcherTimer(DispatcherPriority.Background, Dispatcher)
@@ -256,6 +251,18 @@ namespace TurnWarning
 			};
 			_focusTimer.Tick += FocusTimerOnTick;
 			_focusTimer.Start();
+		}
+
+		private void PositionWindow(IntPtr handle)
+		{
+			if(GetWindowRect(handle, out var rect))
+			{
+				var area = ResolveScreen(_settings).WorkingArea;
+				var width = rect.Right - rect.Left;
+				var height = rect.Bottom - rect.Top;
+				var point = ResolvePosition(area, width, height, _settings.Position);
+				SetWindowPos(handle, HwndTopmost, point.X, point.Y, 0, 0, SwpNoSize | SwpNoActivate);
+			}
 		}
 
 		private void FocusTimerOnTick(object? sender, EventArgs e)
@@ -289,7 +296,7 @@ namespace TurnWarning
 			{
 				From = 1.0,
 				To = 0.35,
-				Duration = TimeSpan.FromMilliseconds(360),
+				Duration = TimeSpan.FromMilliseconds(_settings.PulseIntervalMs / 2.0),
 				AutoReverse = true,
 				RepeatBehavior = _settings.PulseMode == NotificationPulseMode.Brief
 					? new RepeatBehavior(3)
