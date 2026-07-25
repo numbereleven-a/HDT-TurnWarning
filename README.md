@@ -1,4 +1,4 @@
-# TurnWarning
+# Turn Warning
 
 Never miss the start of a Battlegrounds match or Recruit phase while Hearthstone is minimized or behind another window.
 
