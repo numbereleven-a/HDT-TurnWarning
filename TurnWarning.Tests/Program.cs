@@ -36,6 +36,7 @@ namespace TurnWarning
 			Run("Settings normalization clamps unsafe values", SettingsNormalizationClampsValues);
 			Run("Settings clone is independent", SettingsCloneIsIndependent);
 			Run("Settings XML round-trip preserves options", SettingsXmlRoundTripPreservesOptions);
+			Run("Corrupt settings fall back to the last backup", CorruptSettingsFallBackToBackup);
 			Run("Older settings keep Combat warning disabled", OlderSettingsKeepCombatWarningDisabled);
 			Run("Legacy focus option is ignored during upgrade", LegacyFocusOptionIsIgnoredDuringUpgrade);
 			Run("Displayed version omits trailing zeros", DisplayedVersionOmitsTrailingZeros);
@@ -361,6 +362,33 @@ namespace TurnWarning
 		{
 			Assert(new Version(1, 1).ToString() == "1.1", "Plugin API version should be displayed without trailing zeros");
 			Assert(new Version(1, 3, 1).ToString() == "1.3.1", "Patch versions should retain meaningful components");
+		}
+
+		private static void CorruptSettingsFallBackToBackup()
+		{
+			var directory = Path.Combine(Path.GetTempPath(), "TurnWarning.Tests." + Guid.NewGuid().ToString("N"));
+			Directory.CreateDirectory(directory);
+			try
+			{
+				var settingsPath = Path.Combine(directory, "settings.xml");
+				File.WriteAllText(settingsPath, "<PluginSettings>");
+				var backup = new PluginSettings
+				{
+					Title = "Recovered title",
+					DisplaySeconds = 999
+				};
+				var serializer = new XmlSerializer(typeof(PluginSettings));
+				using(var stream = File.Create(settingsPath + ".bak"))
+					serializer.Serialize(stream, backup);
+
+				var restored = SettingsStore.Load(settingsPath);
+				Assert(restored.Title == "Recovered title", "The backup should be used when the primary settings file is corrupt");
+				Assert(restored.DisplaySeconds == 60, "Recovered settings should be normalized");
+			}
+			finally
+			{
+				Directory.Delete(directory, true);
+			}
 		}
 
 		private static void OlderSettingsKeepCombatWarningDisabled()

@@ -122,21 +122,38 @@ namespace TurnWarning
 
 		public static PluginSettings Load()
 		{
+			return Load(SettingsPath);
+		}
+
+		internal static PluginSettings Load(string settingsPath)
+		{
+			if(TryLoad(settingsPath, out var settings)
+				|| TryLoad(settingsPath + ".bak", out settings))
+				return settings;
+			return new PluginSettings();
+		}
+
+		private static bool TryLoad(string path, out PluginSettings settings)
+		{
 			try
 			{
-				if(!File.Exists(SettingsPath))
-					return new PluginSettings();
-				var serializer = new XmlSerializer(typeof(PluginSettings));
-				using(var stream = File.OpenRead(SettingsPath))
+				if(!File.Exists(path))
 				{
-					var settings = serializer.Deserialize(stream) as PluginSettings ?? new PluginSettings();
+					settings = null!;
+					return false;
+				}
+				var serializer = new XmlSerializer(typeof(PluginSettings));
+				using(var stream = File.OpenRead(path))
+				{
+					settings = serializer.Deserialize(stream) as PluginSettings ?? new PluginSettings();
 					settings.Normalize();
-					return settings;
+					return true;
 				}
 			}
 			catch
 			{
-				return new PluginSettings();
+				settings = null!;
+				return false;
 			}
 		}
 

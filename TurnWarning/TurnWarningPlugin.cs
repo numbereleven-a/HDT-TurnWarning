@@ -18,6 +18,7 @@ namespace TurnWarning
 		private readonly object _settingsGate = new object();
 		private volatile bool _enabled;
 		private int _initialRecruitHandled;
+		private int _spectatorSuppressionActive;
 		private DateTime _nextMatchFoundPollUtc = DateTime.MinValue;
 		private PluginSettings _settings = new PluginSettings();
 		private TurnNotificationCoordinator? _notifications;
@@ -29,7 +30,7 @@ namespace TurnWarning
 			+ "GitHub: https://github.com/numbereleven-a/HDT-TurnWarning";
 		public string ButtonText => "Settings";
 		public string Author => "numbereleven-a";
-		public Version Version => new Version(1, 2);
+		public Version Version => new Version(1, 3);
 		public MenuItem MenuItem
 		{
 			get
@@ -59,6 +60,7 @@ namespace TurnWarning
 				isCombat: game?.IsBattlegroundsCombatPhase == true,
 				isReconnect: game?.CurrentGameStats?.IsReconnect == true);
 			Volatile.Write(ref _initialRecruitHandled, game != null && !game.IsInMenu ? 1 : 0);
+			Volatile.Write(ref _spectatorSuppressionActive, 0);
 			_nextMatchFoundPollUtc = DateTime.MinValue;
 			_combatResult.Reset();
 
@@ -142,12 +144,16 @@ namespace TurnWarning
 			var game = HdtCore.Game;
 			if(game != null && game.CurrentGameMode == GameMode.Spectator)
 			{
-				_matchFound.CancelPending();
-				_notifications?.CancelAll();
-				_combatResult.Reset();
-				_tracker.Observe(false, false, false);
+				if(Interlocked.Exchange(ref _spectatorSuppressionActive, 1) == 0)
+				{
+					_matchFound.CancelPending();
+					_notifications?.CancelAll();
+					_combatResult.Reset();
+					_tracker.Observe(false, false, false);
+				}
 				return;
 			}
+			Volatile.Write(ref _spectatorSuppressionActive, 0);
 			if(game != null)
 			{
 				var now = DateTime.UtcNow;
@@ -185,6 +191,7 @@ namespace TurnWarning
 			if(!_enabled)
 				return;
 			var game = HdtCore.Game;
+			_notifications?.CancelAll();
 			_tracker.OnGameStarted(game?.IsBattlegroundsMatch == true);
 			_combatResult.Reset();
 			Volatile.Write(ref _initialRecruitHandled, 0);
