@@ -24,7 +24,9 @@ namespace TurnWarning
 		private readonly DispatcherTimer _closeTimer;
 		private DispatcherTimer? _focusTimer;
 		private DateTime? _focusedSince;
+		private DateTime? _unknownSince;
 		private bool _focusTransitionStarted;
+		private static readonly TimeSpan UnknownStatusGracePeriod = TimeSpan.FromSeconds(1);
 
 		public TurnWarningWindow(PluginSettings settings, NotificationContent content, bool isTest)
 		{
@@ -270,12 +272,14 @@ namespace TurnWarning
 			var status = HearthstoneWindowState.GetStatus();
 			if(status == HearthstoneWindowStatus.Unknown)
 			{
-				if(!_isTest)
+				_unknownSince ??= DateTime.UtcNow;
+				if(!_isTest && DateTime.UtcNow - _unknownSince.Value >= UnknownStatusGracePeriod)
 					Close();
 				else
 					_focusedSince = null;
 				return;
 			}
+			_unknownSince = null;
 			if(status != HearthstoneWindowStatus.Focused)
 			{
 				_focusedSince = null;

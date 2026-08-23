@@ -28,7 +28,7 @@ namespace TurnWarning
 		{
 			if(Volatile.Read(ref _disposed) != 0)
 				return;
-			CloseTest();
+			CloseTestWindow();
 			var generation = Interlocked.Increment(ref _generation);
 			var settings = _settingsProvider();
 			TryBeginInvoke(() => ScheduleOnUi(content, validate, settings, generation));
@@ -56,10 +56,9 @@ namespace TurnWarning
 			});
 		}
 
-		public void CloseTest()
+		public void CloseTestWindow()
 		{
 			Interlocked.Increment(ref _testGeneration);
-			NotificationServices.ClearPreviewSound();
 			if(Volatile.Read(ref _disposed) != 0)
 				return;
 			TryBeginInvoke(() =>

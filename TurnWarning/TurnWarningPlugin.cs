@@ -30,7 +30,7 @@ namespace TurnWarning
 			+ "GitHub: https://github.com/numbereleven-a/HDT-TurnWarning";
 		public string ButtonText => "Settings";
 		public string Author => "numbereleven-a";
-		public Version Version => new Version(1, 3);
+		public Version Version => new Version(1, 3, 1);
 		public MenuItem MenuItem
 		{
 			get
@@ -403,7 +403,8 @@ namespace TurnWarning
 				_settings = settings.Clone();
 			if(settings.FlashMode == TaskbarFlashMode.None)
 				NotificationServices.StopHearthstoneFlash();
-			_notifications?.CloseTest();
+			_notifications?.CloseTestWindow();
+			NotificationServices.ClearPreviewSound();
 			NotificationServices.PrepareSound(settings, forceReload: true);
 		}
 
@@ -433,7 +434,7 @@ namespace TurnWarning
 			window.Closed += (_, _) =>
 			{
 				_settingsWindow = null;
-				_notifications?.CloseTest();
+				_notifications?.CloseTestWindow();
 			};
 			_settingsWindow = window;
 			window.Show();
