@@ -38,32 +38,39 @@ namespace TurnWarning
 		{
 			if(Volatile.Read(ref _disposed) != 0)
 				return;
-			Interlocked.Increment(ref _generation);
-			TryBeginInvoke(CancelPendingOnUi);
+			var generation = Interlocked.Increment(ref _generation);
+			TryBeginInvoke(() =>
+			{
+				if(generation == Volatile.Read(ref _generation))
+					CancelPendingOnUi();
+			});
 		}
 
 		public void CancelAll()
 		{
 			if(Volatile.Read(ref _disposed) != 0)
 				return;
-			Interlocked.Increment(ref _generation);
-			Interlocked.Increment(ref _testGeneration);
+			var generation = Interlocked.Increment(ref _generation);
+			var testGeneration = Interlocked.Increment(ref _testGeneration);
 			TryBeginInvoke(() =>
 			{
+				if(generation != Volatile.Read(ref _generation))
+					return;
 				CancelPendingOnUi();
-				CloseCurrentWindowOnUi();
+				if(!_windowIsTest || testGeneration == Volatile.Read(ref _testGeneration))
+					CloseCurrentWindowOnUi();
 				NotificationServices.StopHearthstoneFlash();
 			});
 		}
 
 		public void CloseTestWindow()
 		{
-			Interlocked.Increment(ref _testGeneration);
+			var testGeneration = Interlocked.Increment(ref _testGeneration);
 			if(Volatile.Read(ref _disposed) != 0)
 				return;
 			TryBeginInvoke(() =>
 			{
-				if(_windowIsTest)
+				if(_windowIsTest && testGeneration == Volatile.Read(ref _testGeneration))
 					CloseCurrentWindowOnUi();
 			});
 		}

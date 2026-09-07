@@ -8,6 +8,8 @@
     <Deterministic>true</Deterministic>
   </PropertyGroup>
   <ItemGroup>
+	<Compile Include="..\TurnWarning\TurnNotificationCoordinator.cs" Link="TurnNotificationCoordinator.cs" />
+	<Compile Include="..\TurnWarning\NotificationContent.cs" Link="NotificationContent.cs" />
 	<Compile Include="..\TurnWarning\TurnBoundaryTracker.cs" Link="TurnBoundaryTracker.cs" />
 	<Compile Include="..\TurnWarning\PluginSettings.cs" Link="PluginSettings.cs" />
 	<Compile Include="..\TurnWarning\CombatResultTracker.cs" Link="CombatResultTracker.cs" />

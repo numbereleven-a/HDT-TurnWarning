@@ -30,7 +30,7 @@ namespace TurnWarning
 			+ "GitHub: https://github.com/numbereleven-a/HDT-TurnWarning";
 		public string ButtonText => "Settings";
 		public string Author => "numbereleven-a";
-		public Version Version => new Version(1, 3, 1);
+		public Version Version => new Version(1, 4);
 		public MenuItem MenuItem
 		{
 			get
@@ -399,6 +399,8 @@ namespace TurnWarning
 				return;
 			settings.Normalize();
 			SettingsStore.Save(settings);
+			// A pending request contains the previous delivery and appearance settings.
+			_notifications?.CancelPending();
 			lock(_settingsGate)
 				_settings = settings.Clone();
 			if(settings.FlashMode == TaskbarFlashMode.None)

@@ -10,6 +10,8 @@ namespace TurnWarning
 
 		private static void Main()
 		{
+			Run("Settings cancellation prevents pending delivery", SettingsCancelDelivery);
+			Run("Delayed cancellation cannot remove a newer request", DelayedCancellation);
 			Run("Combat -> Recruit creates one token", CombatToRecruitCreatesOneToken);
 			Run("Combat reset before event creates one token", CombatResetBeforeEventCreatesOneToken);
 			Run("Either event order suppresses duplicates", EitherEventOrderSuppressesDuplicates);
@@ -62,6 +64,45 @@ namespace TurnWarning
 			Run("Version comparison normalizes missing components", VersionComparisonNormalizesMissingComponents);
 
 			Console.WriteLine($"All {_passed} TurnWarning state-machine tests passed.");
+		}
+
+		private static void SettingsCancelDelivery()
+		{
+			var dispatcher = new System.Windows.Threading.Dispatcher();
+			var settings = new PluginSettings { StabilizationDelayMs = 0 };
+			using(var coordinator = new TurnNotificationCoordinator(dispatcher, () => settings.Clone()))
+			{
+				var before = TurnWarningWindow.Shown;
+				coordinator.Schedule(NotificationContent.ForCombat(), () => true);
+				dispatcher.Drain();
+				coordinator.CancelPending();
+				settings.ShowWindow = false;
+				System.Windows.Threading.DispatcherTimer.Advance();
+				dispatcher.Drain();
+				Assert(TurnWarningWindow.Shown == before, "A request invalidated by saving must not deliver");
+			}
+			dispatcher.Drain();
+		}
+
+		private static void DelayedCancellation()
+		{
+			foreach(var cancelAll in new[] { false, true })
+			{
+				var dispatcher = new System.Windows.Threading.Dispatcher();
+				using(var coordinator = new TurnNotificationCoordinator(dispatcher, () => new PluginSettings { StabilizationDelayMs = 0 }))
+				{
+					if(cancelAll) coordinator.CancelAll(); else coordinator.CancelPending();
+					var oldCancel = dispatcher.Queue[0];
+					dispatcher.Queue.Clear();
+					var before = TurnWarningWindow.Shown;
+					coordinator.Schedule(NotificationContent.ForCombat(), () => true);
+					dispatcher.Drain();
+					oldCancel();
+					System.Windows.Threading.DispatcherTimer.Advance();
+					Assert(TurnWarningWindow.Shown == before + 1, "Old cancellation must preserve the new request");
+				}
+				dispatcher.Drain();
+			}
 		}
 
 		private static void CombatToRecruitCreatesOneToken()
