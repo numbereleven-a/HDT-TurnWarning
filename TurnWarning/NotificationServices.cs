@@ -2,26 +2,16 @@ using System;
 using System.IO;
 using System.Media;
 using System.Runtime.InteropServices;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace TurnWarning
 {
 	internal static class NotificationServices
 	{
-		private static readonly object SoundGate = new object();
-		private static SoundPlayer? _customPlayer;
-		private static string _customRequestedPath = string.Empty;
-		private static bool _customReady;
-		private static bool _customLoading;
-		private static Task<bool> _customLoadingTask = Task.FromResult(false);
-		private static int _soundGeneration;
-		private static readonly object PreviewSoundGate = new object();
-		private static SoundPlayer? _previewPlayer;
-		private static string _previewRequestedPath = string.Empty;
-		private static bool _previewReady;
-		private static bool _previewLoading;
-		private static Task<bool> _previewLoadingTask = Task.FromResult(false);
-		private static int _previewSoundGeneration;
+		private static readonly PreparedSoundSlot CustomSound = new PreparedSoundSlot();
+		private static readonly PreparedSoundSlot PreviewSound = new PreparedSoundSlot();
+		private static int _flashActive;
 		private const uint FlashwStop = 0x00000000;
 		private const uint FlashwTray = 0x00000002;
 		private const uint FlashwTimerNoForeground = 0x0000000C;
@@ -36,7 +26,7 @@ namespace TurnWarning
 				TryPlayFallbackSound();
 				return;
 			}
-			if(TryPlayPreparedSound(requestedPath))
+			if(CustomSound.TryPlay(requestedPath))
 				return;
 			TryPlayFallbackSound();
 			PrepareSound(settings);
@@ -55,264 +45,21 @@ namespace TurnWarning
 				TryPlayFallbackSound();
 				return;
 			}
-			if(!TryPlayPreparedPreviewSound(requestedPath))
+			if(!PreviewSound.TryPlay(requestedPath))
 				TryPlayFallbackSound();
 		}
 
 		public static Task<bool> PreparePreviewSoundAsync(PluginSettings settings)
-		{
-			var requestedPath = settings.PlaySound
-				? (settings.SoundPath ?? string.Empty).Trim()
-				: string.Empty;
-			if(requestedPath.Length == 0)
-			{
-				ClearPreviewSound();
-				return Task.FromResult(false);
-			}
-
-			int generation;
-			SoundPlayer? previous;
-			TaskCompletionSource<bool> completion;
-			lock(PreviewSoundGate)
-			{
-				var sameRequest = string.Equals(
-					_previewRequestedPath,
-					requestedPath,
-					StringComparison.OrdinalIgnoreCase);
-				if(sameRequest && _previewReady)
-					return Task.FromResult(true);
-				if(sameRequest && _previewLoading)
-					return _previewLoadingTask;
-
-				generation = ++_previewSoundGeneration;
-				previous = _previewPlayer;
-				_previewPlayer = null;
-				_previewRequestedPath = requestedPath;
-				_previewReady = false;
-				_previewLoading = true;
-				completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-				_previewLoadingTask = completion.Task;
-			}
-			Task.Run(() => completion.TrySetResult(PreparePreviewSoundCore(requestedPath, generation, previous)));
-			return completion.Task;
-		}
+			=> PreviewSound.PrepareAsync(settings, forceReload: false);
 
 		public static Task<bool> PrepareSoundAsync(PluginSettings settings, bool forceReload = false)
-		{
-			var requestedPath = settings.PlaySound
-				? (settings.SoundPath ?? string.Empty).Trim()
-				: string.Empty;
-			if(requestedPath.Length == 0)
-			{
-				ClearPreparedSound();
-				return Task.FromResult(false);
-			}
-
-			int generation;
-			SoundPlayer? previous;
-			TaskCompletionSource<bool> completion;
-			lock(SoundGate)
-			{
-				var sameRequest = string.Equals(
-					_customRequestedPath,
-					requestedPath,
-					StringComparison.OrdinalIgnoreCase);
-				if(!forceReload && sameRequest && _customReady)
-					return Task.FromResult(true);
-				if(!forceReload && sameRequest && _customLoading)
-					return _customLoadingTask;
-
-				generation = ++_soundGeneration;
-				previous = _customPlayer;
-				_customPlayer = null;
-				_customRequestedPath = requestedPath;
-				_customReady = false;
-				_customLoading = true;
-				completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-				_customLoadingTask = completion.Task;
-			}
-			Task.Run(() => completion.TrySetResult(PrepareSoundCore(requestedPath, generation, previous)));
-			return completion.Task;
-		}
-
-		private static bool PrepareSoundCore(string requestedPath, int generation, SoundPlayer? previous)
-		{
-			SoundPlayer? candidate = null;
-			try
-			{
-				previous?.Dispose();
-				if(!WavFileValidator.TryValidate(requestedPath, out _))
-				{
-					MarkSoundFailed(generation);
-					return false;
-				}
-				var file = new FileInfo(requestedPath);
-				candidate = new SoundPlayer(file.FullName);
-				candidate.Load();
-				lock(SoundGate)
-				{
-					if(generation != _soundGeneration)
-						return false;
-					_customPlayer = candidate;
-					candidate = null;
-					_customReady = true;
-					_customLoading = false;
-				}
-				return true;
-			}
-			catch
-			{
-				MarkSoundFailed(generation);
-				return false;
-			}
-			finally
-			{
-				candidate?.Dispose();
-			}
-		}
-
-		private static void MarkSoundFailed(int generation)
-		{
-			SoundPlayer? previous = null;
-			lock(SoundGate)
-			{
-				if(generation != _soundGeneration)
-					return;
-				previous = _customPlayer;
-				_customPlayer = null;
-				_customReady = false;
-				_customLoading = false;
-				_customLoadingTask = Task.FromResult(false);
-			}
-			previous?.Dispose();
-		}
+			=> CustomSound.PrepareAsync(settings, forceReload);
 
 		public static void ClearPreparedSound()
-		{
-			SoundPlayer? previous;
-			lock(SoundGate)
-			{
-				_soundGeneration++;
-				previous = _customPlayer;
-				_customPlayer = null;
-				_customRequestedPath = string.Empty;
-				_customReady = false;
-				_customLoading = false;
-				_customLoadingTask = Task.FromResult(false);
-			}
-			if(previous != null)
-				Task.Run(previous.Dispose);
-		}
+			=> CustomSound.Clear();
 
 		public static void ClearPreviewSound()
-		{
-			SoundPlayer? previous;
-			lock(PreviewSoundGate)
-			{
-				_previewSoundGeneration++;
-				previous = _previewPlayer;
-				_previewPlayer = null;
-				_previewRequestedPath = string.Empty;
-				_previewReady = false;
-				_previewLoading = false;
-				_previewLoadingTask = Task.FromResult(false);
-			}
-			if(previous != null)
-				Task.Run(previous.Dispose);
-		}
-
-		private static bool PreparePreviewSoundCore(string requestedPath, int generation, SoundPlayer? previous)
-		{
-			SoundPlayer? candidate = null;
-			try
-			{
-				previous?.Dispose();
-				if(!WavFileValidator.TryValidate(requestedPath, out _))
-				{
-					MarkPreviewSoundFailed(generation);
-					return false;
-				}
-				candidate = new SoundPlayer(new FileInfo(requestedPath).FullName);
-				candidate.Load();
-				lock(PreviewSoundGate)
-				{
-					if(generation != _previewSoundGeneration)
-						return false;
-					_previewPlayer = candidate;
-					candidate = null;
-					_previewReady = true;
-					_previewLoading = false;
-				}
-				return true;
-			}
-			catch
-			{
-				MarkPreviewSoundFailed(generation);
-				return false;
-			}
-			finally
-			{
-				candidate?.Dispose();
-			}
-		}
-
-		private static void MarkPreviewSoundFailed(int generation)
-		{
-			SoundPlayer? previous = null;
-			lock(PreviewSoundGate)
-			{
-				if(generation != _previewSoundGeneration)
-					return;
-				previous = _previewPlayer;
-				_previewPlayer = null;
-				_previewReady = false;
-				_previewLoading = false;
-				_previewLoadingTask = Task.FromResult(false);
-			}
-			previous?.Dispose();
-		}
-
-		private static bool TryPlayPreparedPreviewSound(string requestedPath)
-		{
-			SoundPlayer? player;
-			lock(PreviewSoundGate)
-			{
-				if(!_previewReady || _previewPlayer == null
-					|| !string.Equals(_previewRequestedPath, requestedPath, StringComparison.OrdinalIgnoreCase))
-					return false;
-				player = _previewPlayer;
-			}
-			try
-			{
-				player.Play();
-				return true;
-			}
-			catch
-			{
-				return false;
-			}
-		}
-
-		private static bool TryPlayPreparedSound(string requestedPath)
-		{
-			SoundPlayer? player;
-			lock(SoundGate)
-			{
-				if(!_customReady || _customPlayer == null
-					|| !string.Equals(_customRequestedPath, requestedPath, StringComparison.OrdinalIgnoreCase))
-					return false;
-				player = _customPlayer;
-			}
-			try
-			{
-				player.Play();
-				return true;
-			}
-			catch
-			{
-				return false;
-			}
-		}
+			=> PreviewSound.Clear();
 
 		private static void TryPlayFallbackSound()
 		{
@@ -332,6 +79,7 @@ namespace TurnWarning
 			var handle = HearthstoneWindowState.GetMainWindowHandle();
 			if(handle == IntPtr.Zero)
 				return;
+			Volatile.Write(ref _flashActive, 1);
 			var info = new FlashWindowInfo
 			{
 				Size = (uint)Marshal.SizeOf(typeof(FlashWindowInfo)),
@@ -347,6 +95,8 @@ namespace TurnWarning
 
 		public static void StopHearthstoneFlash()
 		{
+			if(Interlocked.Exchange(ref _flashActive, 0) == 0)
+				return;
 			var handle = HearthstoneWindowState.GetMainWindowHandle();
 			if(handle == IntPtr.Zero)
 				return;
@@ -359,6 +109,142 @@ namespace TurnWarning
 				Timeout = 0
 			};
 			FlashWindowEx(ref info);
+		}
+
+		private sealed class PreparedSoundSlot
+		{
+			private readonly object _gate = new object();
+			private SoundPlayer? _player;
+			private string _requestedPath = string.Empty;
+			private bool _ready;
+			private bool _loading;
+			private Task<bool> _loadingTask = Task.FromResult(false);
+			private int _generation;
+
+			public Task<bool> PrepareAsync(PluginSettings settings, bool forceReload)
+			{
+				var requestedPath = settings.PlaySound
+					? (settings.SoundPath ?? string.Empty).Trim()
+					: string.Empty;
+				if(requestedPath.Length == 0)
+				{
+					Clear();
+					return Task.FromResult(false);
+				}
+
+				int generation;
+				SoundPlayer? previous;
+				TaskCompletionSource<bool> completion;
+				lock(_gate)
+				{
+					var sameRequest = string.Equals(
+						_requestedPath,
+						requestedPath,
+						StringComparison.OrdinalIgnoreCase);
+					if(!forceReload && sameRequest && _ready)
+						return Task.FromResult(true);
+					if(!forceReload && sameRequest && _loading)
+						return _loadingTask;
+
+					generation = ++_generation;
+					previous = _player;
+					_player = null;
+					_requestedPath = requestedPath;
+					_ready = false;
+					_loading = true;
+					completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+					_loadingTask = completion.Task;
+				}
+				Task.Run(() => completion.TrySetResult(PrepareCore(requestedPath, generation, previous)));
+				return completion.Task;
+			}
+
+			public void Clear()
+			{
+				SoundPlayer? previous;
+				lock(_gate)
+				{
+					_generation++;
+					previous = _player;
+					_player = null;
+					_requestedPath = string.Empty;
+					_ready = false;
+					_loading = false;
+					_loadingTask = Task.FromResult(false);
+				}
+				if(previous != null)
+					Task.Run(previous.Dispose);
+			}
+
+			public bool TryPlay(string requestedPath)
+			{
+				lock(_gate)
+				{
+					if(!_ready || _player == null
+						|| !string.Equals(_requestedPath, requestedPath, StringComparison.OrdinalIgnoreCase))
+						return false;
+					try
+					{
+						_player.Play();
+						return true;
+					}
+					catch
+					{
+						return false;
+					}
+				}
+			}
+
+			private bool PrepareCore(string requestedPath, int generation, SoundPlayer? previous)
+			{
+				SoundPlayer? candidate = null;
+				try
+				{
+					previous?.Dispose();
+					if(!WavFileValidator.TryValidate(requestedPath, out _))
+					{
+						MarkFailed(generation);
+						return false;
+					}
+					candidate = new SoundPlayer(new FileInfo(requestedPath).FullName);
+					candidate.Load();
+					lock(_gate)
+					{
+						if(generation != _generation)
+							return false;
+						_player = candidate;
+						candidate = null;
+						_ready = true;
+						_loading = false;
+					}
+					return true;
+				}
+				catch
+				{
+					MarkFailed(generation);
+					return false;
+				}
+				finally
+				{
+					candidate?.Dispose();
+				}
+			}
+
+			private void MarkFailed(int generation)
+			{
+				SoundPlayer? previous = null;
+				lock(_gate)
+				{
+					if(generation != _generation)
+						return;
+					previous = _player;
+					_player = null;
+					_ready = false;
+					_loading = false;
+					_loadingTask = Task.FromResult(false);
+				}
+				previous?.Dispose();
+			}
 		}
 
 		[StructLayout(LayoutKind.Sequential)]

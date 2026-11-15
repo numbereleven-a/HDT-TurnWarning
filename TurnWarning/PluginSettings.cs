@@ -108,7 +108,16 @@ namespace TurnWarning
 			DisplaySeconds = Math.Max(2, Math.Min(60, DisplaySeconds));
 			StabilizationDelayMs = Math.Max(0, Math.Min(3000, StabilizationDelayMs));
 			PulseIntervalMs = Math.Max(300, Math.Min(2000, PulseIntervalMs));
+			CombatResultStyle = NormalizeEnum(CombatResultStyle, CombatResultStyle.ResultPanel);
+			FlashMode = NormalizeEnum(FlashMode, TaskbarFlashMode.None);
+			PulseMode = NormalizeEnum(PulseMode, NotificationPulseMode.UntilFocused);
+			MonitorMode = NormalizeEnum(MonitorMode, NotificationMonitorMode.ActiveWindow);
+			Position = NormalizeEnum(Position, NotificationPosition.BottomRight);
+			Style = NormalizeEnum(Style, NotificationStyle.Compact);
 		}
+
+		private static T NormalizeEnum<T>(T value, T fallback) where T : struct, Enum
+			=> Enum.IsDefined(typeof(T), value) ? value : fallback;
 	}
 
 	internal static class SettingsStore

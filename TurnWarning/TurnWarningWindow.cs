@@ -385,6 +385,7 @@ namespace TurnWarning
 
 		private void OnClosed(object? sender, EventArgs e)
 		{
+			BeginAnimation(OpacityProperty, null);
 			_closeTimer.Stop();
 			_closeTimer.Tick -= CloseTimerOnTick;
 			if(_focusTimer != null)

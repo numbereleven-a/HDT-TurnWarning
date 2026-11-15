@@ -9,6 +9,14 @@ namespace TurnWarning
 	{
 		public const long MaxFileBytes = 5L * 1024 * 1024;
 		public const double MaxDurationSeconds = 10;
+		private static readonly byte[] PcmSubFormatGuid =
+		{
+			0x01, 0x00, 0x00, 0x00,
+			0x00, 0x00,
+			0x10, 0x00,
+			0x80, 0x00,
+			0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71
+		};
 
 		public static bool TryValidate(string path, out string error)
 		{
@@ -61,7 +69,8 @@ namespace TurnWarning
 								reader.ReadUInt16();
 								reader.ReadUInt16();
 								reader.ReadUInt32();
-								format = reader.ReadUInt16();
+								var subFormat = reader.ReadBytes(16);
+								format = IsPcmSubFormat(subFormat) ? (ushort)1 : (ushort)0;
 							}
 						}
 						else if(chunkId == "data")
@@ -80,9 +89,10 @@ namespace TurnWarning
 						return Fail("The WAV sample rate must be between 8 and 96 kHz.", out error);
 					if(bitsPerSample != 8 && bitsPerSample != 16 && bitsPerSample != 24 && bitsPerSample != 32)
 						return Fail("The WAV file must use 8, 16, 24, or 32-bit PCM audio.", out error);
+					var computedByteRate = (long)sampleRate * channels * (bitsPerSample / 8);
 					if(byteRate == 0 || dataBytes < 0)
 						return Fail("The WAV file does not contain valid audio data.", out error);
-					if(dataBytes / (double)byteRate > MaxDurationSeconds)
+					if(dataBytes / (double)computedByteRate > MaxDurationSeconds)
 						return Fail("The WAV sound must not be longer than 10 seconds.", out error);
 				}
 				return true;
@@ -103,6 +113,18 @@ namespace TurnWarning
 			{
 				return Fail("The WAV file could not be read.", out error);
 			}
+		}
+
+		private static bool IsPcmSubFormat(byte[] subFormat)
+		{
+			if(subFormat.Length != PcmSubFormatGuid.Length)
+				return false;
+			for(var i = 0; i < PcmSubFormatGuid.Length; i++)
+			{
+				if(subFormat[i] != PcmSubFormatGuid[i])
+					return false;
+			}
+			return true;
 		}
 
 		private static string ReadFourCc(BinaryReader reader)

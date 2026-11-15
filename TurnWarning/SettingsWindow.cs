@@ -60,6 +60,9 @@ namespace TurnWarning
 			ToolTip = "Check for updates"
 		};
 		private CancellationTokenSource? _updateCheckCancellation;
+		private Button? _testButton;
+		private Button? _okButton;
+		private Button? _applyButton;
 		private bool _soundOperationInProgress;
 		private bool _closed;
 
@@ -150,16 +153,19 @@ namespace TurnWarning
 			test.BorderBrush = new SolidColorBrush(Color.FromRgb(170, 158, 125));
 			test.ToolTip = "Preview the currently displayed settings without saving them";
 			test.Click += (_, _) => Preview();
+			_testButton = test;
 
 			var ok = NewButton("OK", 72);
 			ok.Margin = new Thickness(10, 0, 0, 0);
 			ok.Click += (_, _) => Apply(closeAfterSave: true);
+			_okButton = ok;
 			var cancel = NewButton("Cancel", 82);
 			cancel.Margin = new Thickness(8, 0, 0, 0);
 			cancel.Click += (_, _) => Close();
 			var apply = NewButton("Apply", 82);
 			apply.Margin = new Thickness(8, 0, 0, 0);
 			apply.Click += (_, _) => Apply(closeAfterSave: false);
+			_applyButton = apply;
 
 			buttons.Children.Add(test);
 			buttons.Children.Add(ok);
@@ -428,7 +434,7 @@ namespace TurnWarning
 		{
 			if(_soundOperationInProgress)
 				return;
-			_soundOperationInProgress = true;
+			SetSoundOperationState(true);
 			try
 			{
 				_status.Text = string.Empty;
@@ -447,7 +453,7 @@ namespace TurnWarning
 			}
 			finally
 			{
-				_soundOperationInProgress = false;
+				SetSoundOperationState(false);
 			}
 		}
 
@@ -455,7 +461,7 @@ namespace TurnWarning
 		{
 			if(_soundOperationInProgress)
 				return;
-			_soundOperationInProgress = true;
+			SetSoundOperationState(true);
 			try
 			{
 				if(!TryReadSettings(out var settings))
@@ -476,8 +482,20 @@ namespace TurnWarning
 			}
 			finally
 			{
-				_soundOperationInProgress = false;
+				SetSoundOperationState(false);
 			}
+		}
+
+		private void SetSoundOperationState(bool inProgress)
+		{
+			_soundOperationInProgress = inProgress;
+			var enabled = !inProgress;
+			if(_testButton != null)
+				_testButton.IsEnabled = enabled;
+			if(_okButton != null)
+				_okButton.IsEnabled = enabled;
+			if(_applyButton != null)
+				_applyButton.IsEnabled = enabled;
 		}
 
 		private bool TryReadSettings(out PluginSettings settings)
@@ -602,7 +620,9 @@ namespace TurnWarning
 
 		private static void Select<T>(ComboBox combo, T value) where T : struct
 		{
-			combo.SelectedItem = combo.Items.Cast<object>().OfType<Choice<T>>().First(x => EqualityComparer<T>.Default.Equals(x.Value, value));
+			var items = combo.Items.Cast<object>().OfType<Choice<T>>().ToList();
+			combo.SelectedItem = items.FirstOrDefault(x => EqualityComparer<T>.Default.Equals(x.Value, value))
+				?? items.FirstOrDefault();
 		}
 
 		private static T Selected<T>(ComboBox combo) where T : struct

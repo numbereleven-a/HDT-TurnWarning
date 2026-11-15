@@ -15,11 +15,12 @@ namespace TurnWarning
 		private readonly TurnBoundaryTracker _tracker = new TurnBoundaryTracker();
 		private readonly CombatResultTracker _combatResult = new CombatResultTracker();
 		private readonly MatchFoundRequestState _matchFound = new MatchFoundRequestState();
+		private readonly object _phaseSyncGate = new object();
 		private readonly object _settingsGate = new object();
 		private volatile bool _enabled;
 		private int _initialRecruitHandled;
 		private int _spectatorSuppressionActive;
-		private DateTime _nextMatchFoundPollUtc = DateTime.MinValue;
+		private long _nextMatchFoundPollTicks;
 		private PluginSettings _settings = new PluginSettings();
 		private TurnNotificationCoordinator? _notifications;
 		private SettingsWindow? _settingsWindow;
@@ -30,7 +31,7 @@ namespace TurnWarning
 			+ "GitHub: https://github.com/numbereleven-a/HDT-TurnWarning";
 		public string ButtonText => "Settings";
 		public string Author => "numbereleven-a";
-		public Version Version => new Version(1, 4);
+		public Version Version => new Version(1, 4, 1);
 		public MenuItem MenuItem
 		{
 			get
@@ -54,15 +55,18 @@ namespace TurnWarning
 				_notifications = new TurnNotificationCoordinator(dispatcher, GetSettingsSnapshot);
 
 			var game = HdtCore.Game;
-			_tracker.Initialize(
-				matchActive: game != null && !game.IsInMenu,
-				isBattlegrounds: game?.IsBattlegroundsMatch == true,
-				isCombat: game?.IsBattlegroundsCombatPhase == true,
-				isReconnect: game?.CurrentGameStats?.IsReconnect == true);
+			lock(_phaseSyncGate)
+			{
+				_tracker.Initialize(
+					matchActive: game != null && !game.IsInMenu,
+					isBattlegrounds: game?.IsBattlegroundsMatch == true,
+					isCombat: game?.IsBattlegroundsCombatPhase == true,
+					isReconnect: game?.CurrentGameStats?.IsReconnect == true);
+				_combatResult.Reset();
+			}
 			Volatile.Write(ref _initialRecruitHandled, game != null && !game.IsInMenu ? 1 : 0);
 			Volatile.Write(ref _spectatorSuppressionActive, 0);
-			_nextMatchFoundPollUtc = DateTime.MinValue;
-			_combatResult.Reset();
+			Interlocked.Exchange(ref _nextMatchFoundPollTicks, 0);
 
 			GameEventBridge.Attach(this);
 		}
@@ -71,8 +75,11 @@ namespace TurnWarning
 		{
 			_enabled = false;
 			GameEventBridge.Detach(this);
-			_tracker.OnGameEnded();
-			_combatResult.Reset();
+			lock(_phaseSyncGate)
+			{
+				_tracker.OnGameEnded();
+				_combatResult.Reset();
+			}
 			_matchFound.End();
 			NotificationServices.StopHearthstoneFlash();
 			NotificationServices.ClearPreparedSound();
@@ -148,42 +155,33 @@ namespace TurnWarning
 				{
 					_matchFound.CancelPending();
 					_notifications?.CancelAll();
-					_combatResult.Reset();
-					_tracker.Observe(false, false, false);
+					lock(_phaseSyncGate)
+					{
+						_combatResult.Reset();
+						_tracker.Observe(false, false, false);
+					}
 				}
 				return;
 			}
 			Volatile.Write(ref _spectatorSuppressionActive, 0);
 			if(game != null)
 			{
-				var now = DateTime.UtcNow;
-				if(now >= _nextMatchFoundPollUtc)
+				var nowTicks = DateTime.UtcNow.Ticks;
+				var nextTicks = Interlocked.Read(ref _nextMatchFoundPollTicks);
+				if(nowTicks >= nextTicks)
 				{
-					_nextMatchFoundPollUtc = now.AddMilliseconds(250);
+					Interlocked.Exchange(ref _nextMatchFoundPollTicks, nowTicks + TimeSpan.FromMilliseconds(250).Ticks);
 					TryHandlePendingMatchFound(game);
 				}
 			}
-			var isCombat = game?.IsBattlegroundsCombatPhase == true;
-			var transition = _tracker.Observe(
-				matchActive: game != null && !game.IsInMenu,
-				isBattlegrounds: game?.IsBattlegroundsMatch == true,
-				isCombat: isCombat);
-			if(transition == PhaseTransition.EnteredCombat && game != null)
+			CombatToken? combatToken = null;
+			var enteredCombat = false;
+			lock(_phaseSyncGate)
 			{
-				_notifications?.CancelAll();
-				var opponentHero = game.Opponent?.Hero;
-				_combatResult.Begin(opponentHero != null && opponentHero.Health > 0);
-				var combatToken = _tracker.OnCombatStarted();
-				var settings = GetSettingsSnapshot();
-				if(combatToken != null
-					&& settings.NotifyCombatStarted
-					&& HearthstoneWindowState.IsAway(HearthstoneWindowState.GetStatus()))
-				{
-					_notifications?.Schedule(
-						NotificationContent.ForCombat(),
-						() => ValidatePendingCombat(combatToken));
-				}
+				enteredCombat = ObservePhaseLocked(game, out combatToken);
 			}
+			if(enteredCombat)
+				HandleEnteredCombat(combatToken);
 		}
 
 		internal void HandleGameStart()
@@ -192,10 +190,14 @@ namespace TurnWarning
 				return;
 			var game = HdtCore.Game;
 			_notifications?.CancelAll();
-			_tracker.OnGameStarted(game?.IsBattlegroundsMatch == true);
-			_combatResult.Reset();
+			lock(_phaseSyncGate)
+			{
+				_tracker.OnGameStarted(game?.IsBattlegroundsMatch == true);
+				_combatResult.Reset();
+			}
 			Volatile.Write(ref _initialRecruitHandled, 0);
-			_nextMatchFoundPollUtc = DateTime.MinValue;
+			Volatile.Write(ref _spectatorSuppressionActive, 0);
+			Interlocked.Exchange(ref _nextMatchFoundPollTicks, 0);
 			var settings = GetSettingsSnapshot();
 			var shouldWait = game != null
 				&& settings.NotifyMatchFound
@@ -208,10 +210,14 @@ namespace TurnWarning
 		{
 			if(!_enabled)
 				return;
-			_tracker.OnGameEnded();
-			_combatResult.Reset();
+			lock(_phaseSyncGate)
+			{
+				_tracker.OnGameEnded();
+				_combatResult.Reset();
+			}
 			Volatile.Write(ref _initialRecruitHandled, 1);
-			_nextMatchFoundPollUtc = DateTime.MinValue;
+			Volatile.Write(ref _spectatorSuppressionActive, 0);
+			Interlocked.Exchange(ref _nextMatchFoundPollTicks, 0);
 			_matchFound.End();
 			_notifications?.CancelAll();
 			NotificationServices.StopHearthstoneFlash();
@@ -248,20 +254,31 @@ namespace TurnWarning
 					() => ValidateInitialRecruit(matchGeneration));
 				return;
 			}
-			var token = _tracker.OnPlayerTurnStarted(
-				turnNumber,
-				matchActive: !game.IsInMenu,
-				isBattlegrounds: game.IsBattlegroundsMatch,
-				isCombat: game.IsBattlegroundsCombatPhase);
-			if(token == null)
-				return;
-
-			// Focus loss is checked only at the turn boundary. Minimizing later in the
-			// same shopping phase therefore cannot create a warning.
-			if(!HearthstoneWindowState.IsAway(HearthstoneWindowState.GetStatus()))
+			TurnToken? token;
+			CombatResultSummary? combatResult = null;
+			var isAway = false;
+			lock(_phaseSyncGate)
+			{
+				if(game.IsBattlegroundsCombatPhase)
+					ObservePhaseLocked(game, out _);
+				token = _tracker.OnPlayerTurnStarted(
+					turnNumber,
+					matchActive: !game.IsInMenu,
+					isBattlegrounds: game.IsBattlegroundsMatch,
+					isCombat: game.IsBattlegroundsCombatPhase);
+				if(token != null)
+				{
+					// Focus loss is checked only at the turn boundary. Minimizing later in the
+					// same shopping phase therefore cannot create a warning.
+					isAway = HearthstoneWindowState.IsAway(HearthstoneWindowState.GetStatus());
+					if(isAway)
+						combatResult = _combatResult.Complete();
+				}
+			}
+			if(token == null || !isAway)
 				return;
 			var settings = GetSettingsSnapshot();
-			var content = NotificationContent.ForTurn(settings, _combatResult.Complete());
+			var content = NotificationContent.ForTurn(settings, combatResult);
 			_notifications?.Schedule(content, () => ValidatePendingTurn(token));
 		}
 
@@ -324,10 +341,53 @@ namespace TurnWarning
 			if(game == null || !game.IsBattlegroundsMatch || !game.IsBattlegroundsCombatPhase
 				|| game.CurrentGameMode == GameMode.Spectator)
 				return;
+			CombatSide? side = null;
 			if(info.Entity.Id == game.Player?.Hero?.Id)
-				_combatResult.RecordHeroDamage(CombatSide.Player, info.Value);
+				side = CombatSide.Player;
 			else if(info.Entity.Id == game.Opponent?.Hero?.Id)
-				_combatResult.RecordHeroDamage(CombatSide.Opponent, info.Value);
+				side = CombatSide.Opponent;
+			if(side == null)
+				return;
+
+			CombatToken? combatToken = null;
+			var enteredCombat = false;
+			lock(_phaseSyncGate)
+			{
+				enteredCombat = ObservePhaseLocked(game, out combatToken);
+				_combatResult.RecordHeroDamage(side.Value, info.Value);
+			}
+			if(enteredCombat)
+				HandleEnteredCombat(combatToken);
+		}
+
+		private bool ObservePhaseLocked(Hearthstone_Deck_Tracker.Hearthstone.GameV2? game, out CombatToken? combatToken)
+		{
+			combatToken = null;
+			var isCombat = game?.IsBattlegroundsCombatPhase == true;
+			var transition = _tracker.Observe(
+				matchActive: game != null && !game.IsInMenu,
+				isBattlegrounds: game?.IsBattlegroundsMatch == true,
+				isCombat: isCombat);
+			if(transition != PhaseTransition.EnteredCombat || game == null)
+				return false;
+			var opponentHero = game.Opponent?.Hero;
+			_combatResult.Begin(opponentHero != null && opponentHero.Health > 0);
+			combatToken = _tracker.OnCombatStarted();
+			return true;
+		}
+
+		private void HandleEnteredCombat(CombatToken? combatToken)
+		{
+			_notifications?.CancelAll();
+			var settings = GetSettingsSnapshot();
+			if(combatToken != null
+				&& settings.NotifyCombatStarted
+				&& HearthstoneWindowState.IsAway(HearthstoneWindowState.GetStatus()))
+			{
+				_notifications?.Schedule(
+					NotificationContent.ForCombat(),
+					() => ValidatePendingCombat(combatToken));
+			}
 		}
 
 		private bool ValidateMatchFound(int matchGeneration)

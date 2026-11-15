@@ -182,7 +182,11 @@ namespace TurnWarning
 				_phase = TurnPhase.Recruit;
 
 				if(!wasArmed || turn <= 1 || turn == _lastProcessedTurn)
+				{
+					if(!isCombat)
+						_combatNotificationArmed = true;
 					return null;
+				}
 
 				_lastProcessedTurn = turn;
 				_combatNotificationArmed = true;

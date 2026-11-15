@@ -10,6 +10,7 @@ namespace TurnWarning
 		private readonly Dispatcher _dispatcher;
 		private readonly Func<PluginSettings> _settingsProvider;
 		private int _generation;
+		private int _windowGeneration;
 		private int _testGeneration;
 		private int _disposed;
 		private DispatcherTimer? _pendingTimer;
@@ -51,15 +52,19 @@ namespace TurnWarning
 			if(Volatile.Read(ref _disposed) != 0)
 				return;
 			var generation = Interlocked.Increment(ref _generation);
+			var windowGeneration = Interlocked.Increment(ref _windowGeneration);
 			var testGeneration = Interlocked.Increment(ref _testGeneration);
 			TryBeginInvoke(() =>
 			{
-				if(generation != Volatile.Read(ref _generation))
-					return;
-				CancelPendingOnUi();
-				if(!_windowIsTest || testGeneration == Volatile.Read(ref _testGeneration))
+				if(generation == Volatile.Read(ref _generation))
+					CancelPendingOnUi();
+				var closeWindow = _windowIsTest
+					? testGeneration == Volatile.Read(ref _testGeneration)
+					: windowGeneration == Volatile.Read(ref _windowGeneration);
+				if(closeWindow)
 					CloseCurrentWindowOnUi();
-				NotificationServices.StopHearthstoneFlash();
+				if(windowGeneration == Volatile.Read(ref _windowGeneration))
+					NotificationServices.StopHearthstoneFlash();
 			});
 		}
 
@@ -138,6 +143,7 @@ namespace TurnWarning
 				return;
 			if(!isTest && !HearthstoneWindowState.IsAway(HearthstoneWindowState.GetStatus()))
 				return;
+			Interlocked.Increment(ref _windowGeneration);
 			CloseCurrentWindowOnUi();
 			NotificationServices.FlashHearthstone(settings.FlashMode);
 			if(isTest)
@@ -179,6 +185,7 @@ namespace TurnWarning
 			if(Interlocked.Exchange(ref _disposed, 1) != 0)
 				return;
 			Interlocked.Increment(ref _generation);
+			Interlocked.Increment(ref _windowGeneration);
 			Interlocked.Increment(ref _testGeneration);
 			NotificationServices.ClearPreviewSound();
 			TryBeginInvoke(() =>

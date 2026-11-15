@@ -12,6 +12,7 @@ namespace TurnWarning
 		{
 			Run("Settings cancellation prevents pending delivery", SettingsCancelDelivery);
 			Run("Delayed cancellation cannot remove a newer request", DelayedCancellation);
+			Run("CancelAll followed by Schedule closes prior window", CancelAllFollowedByScheduleClosesPriorWindow);
 			Run("Combat -> Recruit creates one token", CombatToRecruitCreatesOneToken);
 			Run("Combat reset before event creates one token", CombatResetBeforeEventCreatesOneToken);
 			Run("Either event order suppresses duplicates", EitherEventOrderSuppressesDuplicates);
@@ -33,9 +34,11 @@ namespace TurnWarning
 			Run("Next valid Recruit phase rearms Combat notification", NextRecruitRearmsCombatNotification);
 			Run("Attach or reconnect during Combat creates no notification", AttachDuringCombatCreatesNoNotification);
 			Run("Late Battlegrounds classification arms future Combat", LateClassificationArmsFutureCombat);
+			Run("Turn 1 after late classification arms future Combat", Turn1AfterLateClassificationArmsFutureCombat);
 			Run("Combat warning requires an active away Battlegrounds battle", CombatWarningRequiresActiveAwayBattle);
 			Run("Default settings use English text and no sound", DefaultSettingsUseEnglishTextAndNoSound);
 			Run("Settings normalization clamps unsafe values", SettingsNormalizationClampsValues);
+			Run("Settings normalization resets invalid enums", SettingsNormalizationResetsInvalidEnums);
 			Run("Settings clone is independent", SettingsCloneIsIndependent);
 			Run("Settings XML round-trip preserves options", SettingsXmlRoundTripPreservesOptions);
 			Run("Corrupt settings fall back to the last backup", CorruptSettingsFallBackToBackup);
@@ -57,6 +60,8 @@ namespace TurnWarning
 			Run("Initial Recruit rejects late or incomplete states", InitialRecruitRejectsInvalidStates);
 			Run("Short PCM WAV passes validation", ShortPcmWavPassesValidation);
 			Run("Long PCM WAV is rejected", LongPcmWavIsRejected);
+			Run("Spoofed byte rate long WAV is rejected", SpoofedByteRateLongWavIsRejected);
+			Run("Non-PCM extensible WAV is rejected", NonPcmExtensibleWavIsRejected);
 			Run("Truncated WAV data is rejected", TruncatedWavDataIsRejected);
 			Run("Invalid WAV path is rejected without throwing", InvalidWavPathIsRejectedWithoutThrowing);
 			Run("Update repository validation is strict", UpdateRepositoryValidationIsStrict);
@@ -103,6 +108,31 @@ namespace TurnWarning
 				}
 				dispatcher.Drain();
 			}
+		}
+
+		private static void CancelAllFollowedByScheduleClosesPriorWindow()
+		{
+			var dispatcher = new System.Windows.Threading.Dispatcher();
+			var settings = new PluginSettings { StabilizationDelayMs = 0 };
+			using(var coordinator = new TurnNotificationCoordinator(dispatcher, () => settings.Clone()))
+			{
+				var shownBefore = TurnWarningWindow.Shown;
+				var closedBefore = TurnWarningWindow.ClosedCount;
+				coordinator.Schedule(NotificationContent.ForTurn(settings, null), () => true);
+				dispatcher.Drain();
+				System.Windows.Threading.DispatcherTimer.Advance();
+				Assert(TurnWarningWindow.Shown == shownBefore + 1, "Initial notification should be shown");
+
+				coordinator.CancelAll();
+				coordinator.Schedule(NotificationContent.ForCombat(), () => false);
+				dispatcher.Drain();
+				Assert(TurnWarningWindow.ClosedCount == closedBefore + 1,
+					"CancelAll must still close the prior window even when followed immediately by Schedule");
+				System.Windows.Threading.DispatcherTimer.Advance();
+				Assert(TurnWarningWindow.Shown == shownBefore + 1,
+					"Rejected new schedule must not deliver after prior window was closed");
+			}
+			dispatcher.Drain();
 		}
 
 		private static void CombatToRecruitCreatesOneToken()
@@ -300,6 +330,15 @@ namespace TurnWarning
 			Assert(tracker.OnCombatStarted() != null, "Classification during Recruit should arm the future battle");
 		}
 
+		private static void Turn1AfterLateClassificationArmsFutureCombat()
+		{
+			var tracker = new TurnBoundaryTracker();
+			tracker.Initialize(true, false, false, false);
+			Assert(tracker.OnPlayerTurnStarted(1, true, true, false) == null, "Turn 1 should not produce a post-combat token");
+			tracker.Observe(true, true, true);
+			Assert(tracker.OnCombatStarted() != null, "First Combat after Turn 1 should arm notification");
+		}
+
 		private static void CombatWarningRequiresActiveAwayBattle()
 		{
 			Assert(CombatNotificationPolicy.CanDeliver(true, true, true, false, true, true),
@@ -349,6 +388,26 @@ namespace TurnWarning
 			Assert(settings.StabilizationDelayMs == 0, "Delay should be clamped");
 			Assert(settings.Title.Length > 0 && settings.Message.Length > 0, "Default text should be restored");
 			Assert(settings.SoundPath == "sound.wav", "Paths should be trimmed");
+		}
+
+		private static void SettingsNormalizationResetsInvalidEnums()
+		{
+			var settings = new PluginSettings
+			{
+				CombatResultStyle = (CombatResultStyle)999,
+				FlashMode = (TaskbarFlashMode)999,
+				PulseMode = (NotificationPulseMode)999,
+				MonitorMode = (NotificationMonitorMode)999,
+				Position = (NotificationPosition)999,
+				Style = (NotificationStyle)999
+			};
+			settings.Normalize();
+			Assert(settings.CombatResultStyle == CombatResultStyle.ResultPanel, "Invalid CombatResultStyle must reset");
+			Assert(settings.FlashMode == TaskbarFlashMode.None, "Invalid FlashMode must reset");
+			Assert(settings.PulseMode == NotificationPulseMode.UntilFocused, "Invalid PulseMode must reset");
+			Assert(settings.MonitorMode == NotificationMonitorMode.ActiveWindow, "Invalid MonitorMode must reset");
+			Assert(settings.Position == NotificationPosition.BottomRight, "Invalid Position must reset");
+			Assert(settings.Style == NotificationStyle.Compact, "Invalid Style must reset");
 		}
 
 		private static void SettingsCloneIsIndependent()
@@ -618,6 +677,38 @@ namespace TurnWarning
 			}
 		}
 
+		private static void SpoofedByteRateLongWavIsRejected()
+		{
+			var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".wav");
+			try
+			{
+				WritePcmWav(path, 11, byteRateOverride: 800000);
+				Assert(!WavFileValidator.TryValidate(path, out var error) && error.Contains("10 seconds"),
+					"A WAV with an inflated byteRate must still fail the 10-second duration check");
+			}
+			finally
+			{
+				if(File.Exists(path))
+					File.Delete(path);
+			}
+		}
+
+		private static void NonPcmExtensibleWavIsRejected()
+		{
+			var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".wav");
+			try
+			{
+				WriteExtensibleWav(path, 0x0003);
+				Assert(!WavFileValidator.TryValidate(path, out _),
+					"An extensible WAV with a non-PCM SubFormat GUID must be rejected");
+			}
+			finally
+			{
+				if(File.Exists(path))
+					File.Delete(path);
+			}
+		}
+
 		private static void TruncatedWavDataIsRejected()
 		{
 			var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".wav");
@@ -675,7 +766,7 @@ namespace TurnWarning
 				"Installed versions should omit trailing zeros");
 		}
 
-		private static void WritePcmWav(string path, int seconds)
+		private static void WritePcmWav(string path, int seconds, int? byteRateOverride = null)
 		{
 			const int sampleRate = 8000;
 			const short channels = 1;
@@ -691,9 +782,39 @@ namespace TurnWarning
 				writer.Write((short)1);
 				writer.Write(channels);
 				writer.Write(sampleRate);
+				writer.Write(byteRateOverride ?? (sampleRate * channels * bits / 8));
+				writer.Write((short)(channels * bits / 8));
+				writer.Write(bits);
+				writer.Write(System.Text.Encoding.ASCII.GetBytes("data"));
+				writer.Write(dataLength);
+				writer.Write(new byte[dataLength]);
+			}
+		}
+
+		private static void WriteExtensibleWav(string path, ushort subFormatTag)
+		{
+			const int sampleRate = 8000;
+			const short channels = 1;
+			const short bits = 16;
+			const int dataLength = sampleRate * 2;
+			using(var stream = File.Create(path))
+			using(var writer = new BinaryWriter(stream))
+			{
+				writer.Write(System.Text.Encoding.ASCII.GetBytes("RIFF"));
+				writer.Write(60 + dataLength);
+				writer.Write(System.Text.Encoding.ASCII.GetBytes("WAVEfmt "));
+				writer.Write(40);
+				writer.Write(unchecked((short)0xFFFE));
+				writer.Write(channels);
+				writer.Write(sampleRate);
 				writer.Write(sampleRate * channels * bits / 8);
 				writer.Write((short)(channels * bits / 8));
 				writer.Write(bits);
+				writer.Write((short)22);
+				writer.Write(bits);
+				writer.Write(4);
+				writer.Write(subFormatTag);
+				writer.Write(new byte[] { 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x80, 0x00, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71 });
 				writer.Write(System.Text.Encoding.ASCII.GetBytes("data"));
 				writer.Write(dataLength);
 				writer.Write(new byte[dataLength]);
