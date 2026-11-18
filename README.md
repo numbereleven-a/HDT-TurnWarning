@@ -1,5 +1,12 @@
 # Turn Warning
 
+> [!WARNING]
+> **Hearthstone Deck Tracker (HDT) is ending plugin support on November 30, 2026.**
+>
+> Starting on that date, HDT will no longer load installed plugins or allow new plugins to be installed.
+>
+> [Read HearthSim’s official announcement](https://help.hearthsim.net/en/articles/18470784-what-s-changing-about-plugins-in-hdt)
+
 Never miss the start of a Battlegrounds match or Recruit phase while Hearthstone is minimized or behind another window.
 
 TurnWarning is a plugin for [Hearthstone Deck Tracker](https://github.com/HearthSim/Hearthstone-Deck-Tracker) that displays a configurable notification when a Battlegrounds match is found or your next Recruit phase begins while Hearthstone is not focused. It is intended for the Windows desktop version of HDT.
